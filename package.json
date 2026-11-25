@@ -1,0 +1,39 @@
+{
+  "name": "reporter-desktop",
+  "version": "1.0.0",
+  "description": "Minimalist High-Precision Analytical CSV Reporter Desktop Application",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:vite": "vite build",
+    "build": "npm run build:vite && npm run build:electron && npm run postbuild",
+    "postbuild": "node -e \"const fs = require('fs'); fs.mkdirSync('dist/sample-data', { recursive: true }); if (fs.existsSync('sample-data/Jira(2).csv')) fs.copyFileSync('sample-data/Jira(2).csv', 'dist/sample-data/Jira(2).csv');\"",
+    "start": "electron ."
+  },
+  "keywords": ["reporter", "csv", "analytics", "electron", "desktop"],
+  "author": "Antigravity",
+  "license": "MIT",
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.469.0",
+    "papaparse": "^5.4.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.0",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/papaparse": "^5.3.15",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.2.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}
