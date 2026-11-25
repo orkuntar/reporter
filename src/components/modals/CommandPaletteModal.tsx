@@ -15,7 +15,8 @@ import {
   Download,
   CornerDownLeft,
   FileSpreadsheet,
-  Columns
+  Columns,
+  CheckSquare
 } from 'lucide-react';
 import { AppView, Dataset, DataRow } from '../../types';
 
@@ -125,6 +126,9 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             { id: 'jira_analytics' as AppView, label: 'Jira Analitiği', icon: GitBranch },
             { id: 'audit_report' as AppView, label: 'Tarih Eksiklik Raporu', icon: ClipboardCheck },
           ]
+        : []),
+      ...(dataset?.sourceType === 'jira' || dataset?.jiraFields?.statusCol
+        ? [{ id: 'completed_report' as AppView, label: 'Tamamlananlar Raporu (Durum = Tamam)', icon: CheckSquare }]
         : []),
       { id: 'grid', label: 'Veri Tablosu', icon: Table },
       { id: 'pivot', label: 'Çapraz Tablo (Pivot)', icon: Grid },

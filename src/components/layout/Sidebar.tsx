@@ -10,6 +10,7 @@ import {
   SlidersHorizontal,
   Download,
   ClipboardCheck,
+  CheckSquare,
   PanelLeftClose,
   PanelLeftOpen
 } from 'lucide-react';
@@ -47,6 +48,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'charts', label: t.chartStudio, icon: BarChart3 },
     ...(isJira ? [{ id: 'jira_analytics', label: t.jiraAnalytics, icon: GitBranch }] : []),
     ...(isJira ? [{ id: 'audit_report', label: t.auditReport, icon: ClipboardCheck }] : []),
+    ...(isJira || Boolean(dataset?.jiraFields?.statusCol)
+      ? [{ id: 'completed_report', label: t.completedReport, icon: CheckSquare }]
+      : []),
     { id: 'grid', label: t.dataGrid, icon: Table },
     { id: 'pivot', label: t.pivotMatrix, icon: Grid },
     { id: 'composer', label: t.reportComposer, icon: FileText },

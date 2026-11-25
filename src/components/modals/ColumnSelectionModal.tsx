@@ -85,6 +85,12 @@ const MAPPING_GROUPS: MappingFieldGroup[] = [
         hint: 'Bitiş tarihi yoksa çözüm süresi hesabında kullanılır',
         preferDate: true,
       },
+      {
+        key: 'updatedCol',
+        label: 'Son Güncelleme Tarihi',
+        hint: 'Güncellenme zamanı ve Tamamlananlar rapor kolonu',
+        preferDate: true,
+      },
     ],
   },
   {
@@ -120,6 +126,11 @@ const MAPPING_GROUPS: MappingFieldGroup[] = [
         key: 'requesterCol',
         label: 'Talep Sahibi',
         hint: 'Özet tabloda talep eden kişi kolonu',
+      },
+      {
+        key: 'lastActorCol',
+        label: 'Son İşlem Yapan (E-posta)',
+        hint: 'Varsa son güncelleyen kullanıcı e-posta/bilgi kolonu (yoksa boş bırakılabilir)',
       },
       {
         key: 'environmentCol',
@@ -198,11 +209,13 @@ export const ColumnSelectionModal: React.FC<ColumnSelectionModalProps> = ({
       assigneeCol: 'Yazılımcı',
       departmentCol: 'Departman',
       requesterCol: 'Talep Sahibi',
+      lastActorCol: 'Son İşlem Yapan',
       startDateCol: 'Başlangıç',
       workStartDateCol: 'Yapım Baş.',
       dueCol: 'Bitiş',
       createdCol: 'Oluşturulan',
       resolvedCol: 'Çözülme',
+      updatedCol: 'Güncelleme',
       labelsCol: 'Etiketler',
       environmentCol: 'Ortam',
       moduleCol: 'Modül',

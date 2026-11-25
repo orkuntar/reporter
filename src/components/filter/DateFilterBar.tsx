@@ -29,6 +29,7 @@ export const DateFilterBar: React.FC<DateFilterBarProps> = ({
       dataset.jiraFields?.dueCol,
       dataset.jiraFields?.createdCol,
       dataset.jiraFields?.resolvedCol,
+      dataset.jiraFields?.updatedCol,
     ].filter(Boolean) as string[]
   );
   const dateCols = dataset.columns.filter(

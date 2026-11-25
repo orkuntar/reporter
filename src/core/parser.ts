@@ -260,6 +260,22 @@ export function detectJiraFields(columnKeys: string[]): NonNullable<Dataset['jir
     if ((lk === 'atanan kişi' || lk === 'assignee') && !jiraFields.assigneeCol) jiraFields.assigneeCol = k;
     if ((lk === 'oluşturulan' || lk === 'created') && !jiraFields.createdCol) jiraFields.createdCol = k;
     if ((lk === 'çözülme tarihi' || lk === 'resolved') && !jiraFields.resolvedCol) jiraFields.resolvedCol = k;
+    if ((lk === 'güncellendi' || lk === 'updated' || lk.includes('son güncelleme') || lk.includes('last updated')) && !jiraFields.updatedCol) {
+      jiraFields.updatedCol = k;
+    }
+    if (
+      (lk.includes('son işlem yapan') ||
+        lk.includes('son güncelleyen') ||
+        lk.includes('güncelleyen') ||
+        lk.includes('updated by') ||
+        lk.includes('last actor') ||
+        lk.includes('e-posta') ||
+        lk.includes('email') ||
+        lk === 'mail') &&
+      !jiraFields.lastActorCol
+    ) {
+      jiraFields.lastActorCol = k;
+    }
     if ((lk === 'bitiş tarihi' || lk === 'due date') && !jiraFields.dueCol) jiraFields.dueCol = k;
     if ((lk.startsWith('etiketler') || lk.startsWith('labels')) && !jiraFields.labelsCol) {
       jiraFields.labelsCol = resolveMergedOrRaw(k);

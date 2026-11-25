@@ -227,16 +227,26 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </h1>
         </div>
 
-        <div className="flex items-center space-x-3 text-2xs font-mono text-slate-400">
+        <div className="flex items-center space-x-2 text-2xs font-mono text-slate-400">
           {isJira && hasStatusCol && (
-            <button
-              onClick={() => onNavigateToView('audit_report')}
-              className="flex items-center space-x-1.5 px-2.5 py-1 bg-amber-950/30 hover:bg-amber-900/40 border border-amber-500/35 text-amber-300 rounded transition-colors"
-            >
-              <ClipboardCheck className="w-3.5 h-3.5" />
-              <span>Tarih Eksiklik Raporu</span>
-              <ArrowRight className="w-3 h-3" />
-            </button>
+            <>
+              <button
+                onClick={() => onNavigateToView('completed_report')}
+                className="flex items-center space-x-1.5 px-2.5 py-1 bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-500/35 text-emerald-300 rounded transition-colors"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Tamamlananlar Raporu</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => onNavigateToView('audit_report')}
+                className="flex items-center space-x-1.5 px-2.5 py-1 bg-amber-950/30 hover:bg-amber-900/40 border border-amber-500/35 text-amber-300 rounded transition-colors"
+              >
+                <ClipboardCheck className="w-3.5 h-3.5" />
+                <span>Tarih Eksiklik Raporu</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </>
           )}
         </div>
       </div>

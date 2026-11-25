@@ -10,6 +10,7 @@ import { OverviewView } from './components/views/OverviewView';
 import { ChartStudioView } from './components/views/ChartStudioView';
 import { JiraAnalyticsView } from './components/views/JiraAnalyticsView';
 import { AuditReportView } from './components/views/AuditReportView';
+import { CompletedReportView } from './components/views/CompletedReportView';
 import { DataGridView } from './components/views/DataGridView';
 import { PivotView } from './components/views/PivotView';
 import { ComposerView } from './components/views/ComposerView';
@@ -1034,6 +1035,17 @@ const MainApplication: React.FC = () => {
 
               {activeView === 'audit_report' && (
                 <AuditReportView
+                  dataset={dataset}
+                  filteredRows={filteredRows}
+                  columnMetaMap={columnMetaMap}
+                  onSelectRow={setSelectedRow}
+                  onChartElementClick={handleToggleFacetValue}
+                  onOpenColumnSelection={() => handleOpenColumnSelection(null, 'mapping')}
+                />
+              )}
+
+              {activeView === 'completed_report' && (
+                <CompletedReportView
                   dataset={dataset}
                   filteredRows={filteredRows}
                   columnMetaMap={columnMetaMap}

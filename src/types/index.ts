@@ -42,6 +42,8 @@ export interface Dataset {
     assigneeCol?: string;
     createdCol?: string;
     resolvedCol?: string;
+    updatedCol?: string;
+    lastActorCol?: string;
     dueCol?: string;
     labelsCol?: string;
     departmentCol?: string;
@@ -60,6 +62,8 @@ export interface Dataset {
     assigneeCol?: string;
     createdCol?: string;
     resolvedCol?: string;
+    updatedCol?: string;
+    lastActorCol?: string;
     dueCol?: string;
     labelsCol?: string;
     departmentCol?: string;
@@ -169,6 +173,7 @@ export type AppView =
   | 'charts'
   | 'jira_analytics'
   | 'audit_report'
+  | 'completed_report'
   | 'grid'
   | 'pivot'
   | 'composer'
