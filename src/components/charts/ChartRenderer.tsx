@@ -26,6 +26,7 @@ import {
 } from 'recharts';
 import { ChartConfig, ColumnMeta, DataRow } from '../../types';
 import { aggregateData } from '../../core/analyticsEngine';
+import { parseCustomDate, parseNumber } from '../../core/parser';
 import { useTheme } from '../../theme/ThemeContext';
 
 interface ChartRendererProps {
@@ -33,6 +34,7 @@ interface ChartRendererProps {
   rows: DataRow[];
   columnMetaMap: Map<string, ColumnMeta>;
   height?: number | string;
+  onElementClick?: (columnKey: string, value: string) => void;
 }
 
 const DARK_PALETTES = {
@@ -54,10 +56,12 @@ const LIGHT_PALETTES = {
 // Custom Minimalist Tooltip (Theme-Aware)
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
+    const firstPayload = payload[0]?.payload;
+    const displayTitle = label !== undefined && label !== '' ? label : (firstPayload?.name || payload[0]?.name);
     return (
       <div className="bg-[#0e1219]/95 border border-white/[0.12] px-3 py-2 rounded shadow-2xl backdrop-blur-md text-xs font-mono">
         <p className="text-slate-300 font-semibold mb-1 border-b border-white/[0.08] pb-1">
-          {label !== undefined ? label : payload[0]?.name}
+          {displayTitle}
         </p>
         {payload.map((entry: any, index: number) => (
           <div key={`item-${index}`} className="flex items-center justify-between space-x-3 text-2xs py-0.5">
@@ -65,7 +69,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: entry.color || '#0891b2' }} />
               <span className="text-slate-400">{entry.name || 'Değer'}:</span>
             </span>
-            <span className="text-white font-bold">{entry.value?.toLocaleString()}</span>
+            <span className="text-white font-bold">
+              {typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value}
+            </span>
           </div>
         ))}
       </div>
@@ -74,11 +80,64 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
+// Custom Theme-Aware Treemap Tile Renderer
+const CustomTreemapContent = (props: any) => {
+  const { depth, x, y, width, height, name, size, fill, cellBorder, onTileClick } = props;
+  if (depth === 0 || width <= 4 || height <= 4) return null;
+  const showLabel = width > 54 && height > 26;
+  const showSub = width > 70 && height > 44;
+
+  return (
+    <g
+      onClick={() => onTileClick && name && onTileClick(name)}
+      style={{ cursor: onTileClick ? 'pointer' : 'default' }}
+    >
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        fill={fill || '#0891b2'}
+        fillOpacity={0.85}
+        stroke={cellBorder}
+        strokeWidth={2}
+        rx={3}
+      />
+      {showLabel && (
+        <text
+          x={x + 8}
+          y={y + 18}
+          fill="#ffffff"
+          fontSize={11}
+          fontWeight={600}
+          fontFamily="Montserrat, sans-serif"
+        >
+          {String(name).length > Math.floor(width / 7)
+            ? `${String(name).slice(0, Math.max(3, Math.floor(width / 7) - 2))}..`
+            : name}
+        </text>
+      )}
+      {showSub && (
+        <text
+          x={x + 8}
+          y={y + 34}
+          fill="rgba(255,255,255,0.85)"
+          fontSize={10}
+          fontFamily="Montserrat, sans-serif"
+        >
+          {typeof size === 'number' ? size.toLocaleString() : size}
+        </text>
+      )}
+    </g>
+  );
+};
+
 export const ChartRenderer: React.FC<ChartRendererProps> = ({
   config,
   rows,
   columnMetaMap,
   height = 360,
+  onElementClick,
 }) => {
   const { theme } = useTheme();
   const isLight = theme === 'light';
@@ -94,6 +153,13 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
   const cellBorder = isLight ? '#ffffff' : '#0a0c10';
   const legendColor = isLight ? '#475569' : '#94a3b8';
   const activeDotFill = isLight ? '#0f172a' : '#fff';
+
+  const handleSliceClick = (label: string) => {
+    if (!onElementClick || !config.xAxisCol) return;
+    if (label === 'Diğer' || label === 'Other' || config.xAxisCol.startsWith('_derived_')) return;
+    const normalizedVal = label === '(Boş)' || label === '(Yok)' ? '' : label;
+    onElementClick(config.xAxisCol, normalizedVal);
+  };
 
   if (data.length === 0) {
     return (
@@ -117,6 +183,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
     : [];
 
   const hasMultiSeries = Boolean(config.groupByCol && secondaryKeys.length > 0);
+  const clickableClass = onElementClick && !config.xAxisCol.startsWith('_derived_') ? 'cursor-pointer' : '';
 
   switch (config.type) {
     case 'bar_vertical':
@@ -148,11 +215,20 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
                       name={key}
                       fill={palette[idx % palette.length]}
                       radius={[2, 2, 0, 0]}
+                      className={clickableClass}
+                      onClick={(entry: any) => entry?.label && handleSliceClick(entry.label)}
                     />
                   ))}
                 </>
               ) : (
-                <Bar dataKey="value" name={config.aggregation.toUpperCase()} fill={palette[0]} radius={[2, 2, 0, 0]}>
+                <Bar
+                  dataKey="value"
+                  name={config.aggregation.toUpperCase()}
+                  fill={palette[0]}
+                  radius={[2, 2, 0, 0]}
+                  className={clickableClass}
+                  onClick={(entry: any) => entry?.label && handleSliceClick(entry.label)}
+                >
                   {data.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={palette[index % palette.length]} />
                   ))}
@@ -197,11 +273,20 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
                       stackId={config.stackedSeries ? 'a' : undefined}
                       fill={palette[idx % palette.length]}
                       radius={[0, 2, 2, 0]}
+                      className={clickableClass}
+                      onClick={(entry: any) => entry?.label && handleSliceClick(entry.label)}
                     />
                   ))}
                 </>
               ) : (
-                <Bar dataKey="value" name={config.aggregation.toUpperCase()} fill={palette[0]} radius={[0, 2, 2, 0]}>
+                <Bar
+                  dataKey="value"
+                  name={config.aggregation.toUpperCase()}
+                  fill={palette[0]}
+                  radius={[0, 2, 2, 0]}
+                  className={clickableClass}
+                  onClick={(entry: any) => entry?.label && handleSliceClick(entry.label)}
+                >
                   {data.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={palette[index % palette.length]} />
                   ))}
@@ -242,10 +327,19 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
                     name={key}
                     stackId="a"
                     fill={palette[idx % palette.length]}
+                    className={clickableClass}
+                    onClick={(entry: any) => entry?.label && handleSliceClick(entry.label)}
                   />
                 ))
               ) : (
-                <Bar dataKey="value" name={config.aggregation.toUpperCase()} stackId="a" fill={palette[0]} />
+                <Bar
+                  dataKey="value"
+                  name={config.aggregation.toUpperCase()}
+                  stackId="a"
+                  fill={palette[0]}
+                  className={clickableClass}
+                  onClick={(entry: any) => entry?.label && handleSliceClick(entry.label)}
+                />
               )}
             </BarChart>
           </ResponsiveContainer>
@@ -391,6 +485,8 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
                 paddingAngle={3}
                 dataKey="value"
                 nameKey="label"
+                className={clickableClass}
+                onClick={(entry: any) => entry?.label && handleSliceClick(entry.label)}
               >
                 {data.map((_, index) => (
                   <Cell
@@ -457,35 +553,71 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
       );
 
     case 'scatter': {
-      const scatterPoints = rows.slice(0, 150).map((r, i) => {
-        return {
-          x: i + 1,
-          y: config.yAxisCol ? r[config.yAxisCol] || 0 : 1,
-          name: String(r[config.xAxisCol] || `Item ${i + 1}`),
-        };
-      });
+      // True 2-column comparison (numeric or date-epoch-day vs numeric/date) with fallback to index
+      const xMeta = columnMetaMap.get(config.xAxisCol);
+      const yColKey = config.yAxisCol || '_derived_lead_time_days';
+      const yMeta = columnMetaMap.get(yColKey);
+      const isXNum = xMeta?.type === 'number';
+      const isXDate = Boolean(xMeta?.type === 'date' || xMeta?.isDateColumn);
+      const isYDate = Boolean(yMeta?.type === 'date' || yMeta?.isDateColumn);
+
+      const scatterPoints = rows
+        .slice(0, 300)
+        .map((r, i) => {
+          let xVal = i + 1;
+          if (isXNum) {
+            const n = parseNumber(r[config.xAxisCol]);
+            if (n === null) return null;
+            xVal = n;
+          } else if (isXDate) {
+            const d = parseCustomDate(r[config.xAxisCol]);
+            if (!d) return null;
+            xVal = Math.round(d.getTime() / (1000 * 60 * 60 * 24));
+          }
+
+          let yVal = 0;
+          if (isYDate) {
+            const d = parseCustomDate(r[yColKey]);
+            if (!d) return null;
+            yVal = Math.round(d.getTime() / (1000 * 60 * 60 * 24));
+          } else {
+            const n = parseNumber(r[yColKey]);
+            if (n === null) return null;
+            yVal = n;
+          }
+
+          const keyLabel = r['Konu anahtarı'] || r._id;
+          return {
+            x: xVal,
+            y: yVal,
+            name: `${keyLabel}${!isXNum && !isXDate ? ` · ${String(r[config.xAxisCol] || '')}` : ''}`,
+          };
+        })
+        .filter(Boolean);
 
       return (
         <div style={{ height, width: '100%' }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+            <ScatterChart margin={{ top: 20, right: 20, bottom: 25, left: 20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
               <XAxis
                 type="number"
                 dataKey="x"
-                name="Index"
+                name={isXNum || isXDate ? (xMeta?.label || config.xAxisCol) : 'Sıra'}
                 stroke={axisStroke}
                 tick={{ fill: tickFill, fontSize: 10, fontFamily: 'Montserrat, sans-serif' }}
+                domain={['auto', 'auto']}
               />
               <YAxis
                 type="number"
                 dataKey="y"
-                name={config.yAxisCol || 'Value'}
+                name={yMeta?.label || yColKey}
                 stroke={axisStroke}
                 tick={{ fill: tickFill, fontSize: 10, fontFamily: 'Montserrat, sans-serif' }}
+                domain={['auto', 'auto']}
               />
-              <Tooltip content={<CustomTooltip />} />
-              <Scatter name="Kayıtlar" data={scatterPoints} fill={palette[0]} />
+              <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
+              <Scatter name="Kayıtlar" data={scatterPoints} fill={palette[0]} fillOpacity={0.75} />
             </ScatterChart>
           </ResponsiveContainer>
         </div>
@@ -505,7 +637,12 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
               dataKey="size"
               aspectRatio={4 / 3}
               stroke={cellBorder}
-              fill={palette[0]}
+              content={
+                <CustomTreemapContent
+                  cellBorder={cellBorder}
+                  onTileClick={onElementClick ? handleSliceClick : undefined}
+                />
+              }
             >
               <Tooltip content={<CustomTooltip />} />
             </Treemap>

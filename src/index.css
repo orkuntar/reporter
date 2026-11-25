@@ -35,6 +35,15 @@
     font-feature-settings: 'tnum';
     user-select: none;
     -webkit-user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'] {
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   html.light body {
@@ -300,3 +309,60 @@ html.light .bg-black\/70,
 html.light .bg-black\/75 {
   background-color: rgba(15, 23, 42, 0.45) !important;
 }
+
+/* ==========================================================================
+   Executive PDF / Print Layout Rules (@media print)
+   Hides application chrome and opens scrollable report content cleanly
+   ========================================================================== */
+@media print {
+  @page {
+    margin: 10mm;
+  }
+
+  html,
+  body,
+  #root,
+  main,
+  .print-container {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-break-inside {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .bg-\[\#080a0e\],
+  .bg-\[\#0a0c10\],
+  .bg-\[\#0f1219\],
+  .bg-\[\#0c0f16\],
+  .bg-\[\#141822\] {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  .text-white,
+  .text-slate-200,
+  .text-slate-300,
+  .text-slate-400 {
+    color: #0f172a !important;
+  }
+
+  input,
+  textarea {
+    border: none !important;
+    background: transparent !important;
+    color: #0f172a !important;
+    resize: none !important;
+  }
+}
+

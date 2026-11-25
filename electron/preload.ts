@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 export interface ElectronAPI {
   isElectron: boolean;
+  platform: NodeJS.Platform;
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<boolean>;
   isMaximized: () => Promise<boolean>;
@@ -34,6 +35,11 @@ export interface ElectronAPI {
     content: string;
     filters?: Array<{ name: string; extensions: string[] }>;
   }) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+  saveBinaryFile: (payload: {
+    defaultName: string;
+    data: number[];
+    filters?: Array<{ name: string; extensions: string[] }>;
+  }) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; error?: string }>;
   exportPdf: (options?: {
     fileName?: string;
     pageSize?: string;
@@ -46,6 +52,7 @@ export interface ElectronAPI {
 
 const electronAPI: ElectronAPI = {
   isElectron: true,
+  platform: process.platform,
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
@@ -54,6 +61,7 @@ const electronAPI: ElectronAPI = {
   readFilePath: (targetPath: string) => ipcRenderer.invoke('file:readPath', targetPath),
   getDesktopJira: () => ipcRenderer.invoke('file:getDesktopJira'),
   saveFile: (payload) => ipcRenderer.invoke('dialog:saveFile', payload),
+  saveBinaryFile: (payload) => ipcRenderer.invoke('dialog:saveBinaryFile', payload),
   exportPdf: (options) => ipcRenderer.invoke('export:pdf', options),
   listDatasets: () => ipcRenderer.invoke('storage:listDatasets'),
   saveDataset: (dataset) => ipcRenderer.invoke('storage:saveDataset', dataset),

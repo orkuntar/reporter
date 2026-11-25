@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Sliders,
   RotateCcw,
   FilePlus2,
   Calendar,
-  Check
+  Check,
+  Pin
 } from 'lucide-react';
 import { ChartConfig, ChartType, ColumnMeta, Dataset, DataRow, DateGranularity } from '../../types';
 import { ChartRenderer } from '../charts/ChartRenderer';
@@ -17,7 +18,9 @@ interface ChartStudioViewProps {
   filteredRows: DataRow[];
   columnMetaMap: Map<string, ColumnMeta>;
   onAddChartToComposer: (config: ChartConfig) => void;
+  onPinToOverview: (config: ChartConfig) => void;
   onSelectRow: (row: DataRow) => void;
+  onChartElementClick?: (columnKey: string, value: string) => void;
 }
 
 export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
@@ -25,7 +28,9 @@ export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
   filteredRows,
   columnMetaMap,
   onAddChartToComposer,
+  onPinToOverview,
   onSelectRow,
+  onChartElementClick,
 }) => {
   const { t } = useLanguage();
   const isJira = dataset.sourceType === 'jira';
@@ -47,7 +52,9 @@ export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
     id: `custom_${Date.now()}`,
     title: isJira ? 'Durum Kategorisine Göre Dağılım' : 'Dağılım Analizi',
     type: 'bar_vertical',
-    xAxisCol: isJira ? '_derived_status_bucket' : dataset.columns[0]?.key || '',
+    xAxisCol: columnMetaMap.has('_derived_status_bucket')
+      ? '_derived_status_bucket'
+      : dataset.columns[0]?.key || '',
     aggregation: 'count',
     colorPalette: 'technical',
     sortBy: 'value_desc',
@@ -55,6 +62,29 @@ export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
     stackedSeries: false,
     topN: 10,
   });
+
+  useEffect(() => {
+    const activeSet = new Set(dataset.columns.map(c => c.key));
+    setConfig(prev => {
+      const nextX = activeSet.has(prev.xAxisCol)
+        ? prev.xAxisCol
+        : activeSet.has('_derived_status_bucket')
+        ? '_derived_status_bucket'
+        : dataset.columns[0]?.key || '';
+      const nextY = prev.yAxisCol && activeSet.has(prev.yAxisCol) ? prev.yAxisCol : undefined;
+      const nextGroup = prev.groupByCol && activeSet.has(prev.groupByCol) ? prev.groupByCol : undefined;
+      if (nextX === prev.xAxisCol && nextY === prev.yAxisCol && nextGroup === prev.groupByCol) {
+        return prev;
+      }
+      return {
+        ...prev,
+        xAxisCol: nextX,
+        yAxisCol: nextY,
+        groupByCol: nextGroup,
+        includeSubValues: nextGroup === prev.groupByCol ? prev.includeSubValues : undefined,
+      };
+    });
+  }, [dataset.columns]);
 
   const [notification, setNotification] = useState<string | null>(null);
 
@@ -133,6 +163,12 @@ export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const handlePinOverview = () => {
+    onPinToOverview({ ...config, id: `pinned_${Date.now()}` });
+    setNotification('Grafik, Genel Bakış panosuna sabitlendi');
+    setTimeout(() => setNotification(null), 3000);
+  };
+
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Left Control Inspector */}
@@ -172,89 +208,100 @@ export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
             <div className="grid grid-cols-2 gap-1.5 text-2xs font-mono">
               {isJira && (
                 <>
-                  <button
-                    onClick={() =>
-                      handleApplyTemplate({
-                        title: 'Tarih Bazlı Durum Trendi (Alankart)',
-                        type: 'area',
-                        xAxisCol: dataset.jiraFields?.startDateCol || dataset.jiraFields?.createdCol || 'Oluşturulan',
-                        groupByCol: dataset.jiraFields?.statusCol || 'Durum',
-                        dateGranularity: 'day',
-                        sortBy: 'date_asc',
-                        aggregation: 'count',
-                        colorPalette: 'technical',
-                      })
-                    }
-                    className="col-span-2 p-1.5 bg-cyan-950/30 hover:bg-cyan-900/40 border border-cyan-500/30 rounded text-left truncate text-cyan-300 font-semibold"
-                  >
-                    Tarih & Durum Trendi (Alankart)
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleApplyTemplate({
-                        title: 'Durum Kategorisi Halka Grafiği',
-                        type: 'donut',
-                        xAxisCol: '_derived_status_bucket',
-                        groupByCol: undefined,
-                        aggregation: 'count',
-                        sortBy: 'value_desc',
-                        colorPalette: 'technical',
-                      })
-                    }
-                    className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
-                  >
-                    Durum Donut
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleApplyTemplate({
-                        title: 'Yazılımcı İş Yükü',
-                        type: 'bar_horizontal',
-                        xAxisCol: dataset.jiraFields?.assigneeCol || 'Atanan Kişi',
-                        groupByCol: undefined,
-                        aggregation: 'count',
-                        sortBy: 'value_desc',
-                        colorPalette: 'technical',
-                        topN: 12,
-                      })
-                    }
-                    className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
-                  >
-                    Yazılımcı Yükü
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleApplyTemplate({
-                        title: 'Öncelik Seviyeleri Dağılımı',
-                        type: 'bar_vertical',
-                        xAxisCol: dataset.jiraFields?.priorityCol || 'Öncelik',
-                        groupByCol: undefined,
-                        aggregation: 'count',
-                        sortBy: 'value_desc',
-                        colorPalette: 'warm',
-                      })
-                    }
-                    className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
-                  >
-                    Öncelik Seviyeleri
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleApplyTemplate({
-                        title: 'Departman Talep Hacmi',
-                        type: 'bar_horizontal',
-                        xAxisCol: dataset.jiraFields?.departmentCol || 'Özel alan (Talep Eden Departman)',
-                        groupByCol: undefined,
-                        aggregation: 'count',
-                        sortBy: 'value_desc',
-                        colorPalette: 'emerald',
-                        topN: 8,
-                      })
-                    }
-                    className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
-                  >
-                    Departman Hacmi
-                  </button>
+                  {(dataset.jiraFields?.startDateCol || dataset.jiraFields?.createdCol) &&
+                    dataset.jiraFields?.statusCol && (
+                      <button
+                        onClick={() =>
+                          handleApplyTemplate({
+                            title: 'Tarih Bazlı Durum Trendi (Alankart)',
+                            type: 'area',
+                            xAxisCol: dataset.jiraFields?.startDateCol || dataset.jiraFields?.createdCol || '',
+                            groupByCol: dataset.jiraFields?.statusCol,
+                            dateGranularity: 'day',
+                            sortBy: 'date_asc',
+                            aggregation: 'count',
+                            colorPalette: 'technical',
+                          })
+                        }
+                        className="col-span-2 p-1.5 bg-cyan-950/30 hover:bg-cyan-900/40 border border-cyan-500/30 rounded text-left truncate text-cyan-300 font-semibold"
+                      >
+                        Tarih & Durum Trendi (Alankart)
+                      </button>
+                    )}
+                  {columnMetaMap.has('_derived_status_bucket') && (
+                    <button
+                      onClick={() =>
+                        handleApplyTemplate({
+                          title: 'Durum Kategorisi Halka Grafiği',
+                          type: 'donut',
+                          xAxisCol: '_derived_status_bucket',
+                          groupByCol: undefined,
+                          aggregation: 'count',
+                          sortBy: 'value_desc',
+                          colorPalette: 'technical',
+                        })
+                      }
+                      className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
+                    >
+                      Durum Donut
+                    </button>
+                  )}
+                  {dataset.jiraFields?.assigneeCol && columnMetaMap.has(dataset.jiraFields.assigneeCol) && (
+                    <button
+                      onClick={() =>
+                        handleApplyTemplate({
+                          title: 'Yazılımcı İş Yükü',
+                          type: 'bar_horizontal',
+                          xAxisCol: dataset.jiraFields?.assigneeCol || '',
+                          groupByCol: undefined,
+                          aggregation: 'count',
+                          sortBy: 'value_desc',
+                          colorPalette: 'technical',
+                          topN: 12,
+                        })
+                      }
+                      className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
+                    >
+                      Yazılımcı Yükü
+                    </button>
+                  )}
+                  {dataset.jiraFields?.priorityCol && columnMetaMap.has(dataset.jiraFields.priorityCol) && (
+                    <button
+                      onClick={() =>
+                        handleApplyTemplate({
+                          title: 'Öncelik Seviyeleri Dağılımı',
+                          type: 'bar_vertical',
+                          xAxisCol: dataset.jiraFields?.priorityCol || '',
+                          groupByCol: undefined,
+                          aggregation: 'count',
+                          sortBy: 'value_desc',
+                          colorPalette: 'warm',
+                        })
+                      }
+                      className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
+                    >
+                      Öncelik Seviyeleri
+                    </button>
+                  )}
+                  {dataset.jiraFields?.departmentCol && columnMetaMap.has(dataset.jiraFields.departmentCol) && (
+                    <button
+                      onClick={() =>
+                        handleApplyTemplate({
+                          title: 'Departman Talep Hacmi',
+                          type: 'bar_horizontal',
+                          xAxisCol: dataset.jiraFields?.departmentCol || '',
+                          groupByCol: undefined,
+                          aggregation: 'count',
+                          sortBy: 'value_desc',
+                          colorPalette: 'emerald',
+                          topN: 8,
+                        })
+                      }
+                      className="p-1.5 bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] rounded text-left truncate text-slate-300"
+                    >
+                      Departman Hacmi
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -511,8 +558,16 @@ export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
           )}
         </div>
 
-        {/* Action: Add to Composer */}
-        <div className="pt-2 border-t border-white/[0.06]">
+        {/* Actions: Pin to Overview & Add to Composer */}
+        <div className="pt-2 border-t border-white/[0.06] space-y-2">
+          <button
+            onClick={handlePinOverview}
+            className="w-full flex items-center justify-center space-x-2 px-3 py-2 text-2xs font-mono uppercase tracking-wider text-emerald-300 bg-emerald-950/35 hover:bg-emerald-900/45 border border-emerald-500/40 rounded transition-colors"
+          >
+            <Pin className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Genel Bakışa Sabitle</span>
+          </button>
+
           <button
             onClick={handleSaveToComposer}
             className="w-full flex items-center justify-center space-x-2 px-3 py-2 text-2xs font-mono uppercase tracking-wider text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-500/40 rounded transition-colors"
@@ -561,6 +616,7 @@ export const ChartStudioView: React.FC<ChartStudioViewProps> = ({
               rows={filteredRows}
               columnMetaMap={columnMetaMap}
               height={400}
+              onElementClick={onChartElementClick}
             />
           </div>
         </div>

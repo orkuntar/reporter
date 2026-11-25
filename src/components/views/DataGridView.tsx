@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ArrowUpDown,
   ArrowUp,
@@ -44,10 +44,22 @@ export const DataGridView: React.FC<DataGridViewProps> = ({
     if (dataset.jiraFields?.departmentCol) keys.push(dataset.jiraFields.departmentCol);
 
     if (keys.length === 0) {
-      return dataset.columns.slice(0, 8).map(c => c.key);
+      return dataset.columns.filter(c => !c.key.startsWith('_derived_')).slice(0, 8).map(c => c.key);
     }
     return keys;
   });
+
+  useEffect(() => {
+    const activeSet = new Set(dataset.columns.map(c => c.key));
+    setVisibleColKeys(prev => {
+      const kept = prev.filter(k => activeSet.has(k));
+      if (kept.length > 0) return kept;
+      return dataset.columns.filter(c => !c.key.startsWith('_derived_')).slice(0, 8).map(c => c.key);
+    });
+    if (sortCol && !activeSet.has(sortCol)) {
+      setSortCol(dataset.jiraFields?.keyCol || dataset.columns[0]?.key || '');
+    }
+  }, [dataset.columns, dataset.jiraFields, sortCol]);
   const [showColPicker, setShowColPicker] = useState(false);
 
   // Filter rows by table search

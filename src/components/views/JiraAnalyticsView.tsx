@@ -14,6 +14,7 @@ interface JiraAnalyticsViewProps {
   filteredRows: DataRow[];
   columnMetaMap: Map<string, ColumnMeta>;
   onSelectRow: (row: DataRow) => void;
+  onChartElementClick?: (columnKey: string, value: string) => void;
 }
 
 export const JiraAnalyticsView: React.FC<JiraAnalyticsViewProps> = ({
@@ -21,29 +22,38 @@ export const JiraAnalyticsView: React.FC<JiraAnalyticsViewProps> = ({
   filteredRows,
   columnMetaMap,
   onSelectRow,
+  onChartElementClick,
 }) => {
   const { t } = useLanguage();
 
-  // Compute Jira-specific deep stats
+  // Compute Jira-specific deep stats strictly from active/selected columns
   let bugCount = 0;
   let featureCount = 0;
   let revisionCount = 0;
+  const labelsCol = dataset.jiraFields?.labelsCol;
 
-  filteredRows.forEach(row => {
-    const labels = row['_merged_Etiketler'] || [];
-    if (Array.isArray(labels)) {
-      if (labels.includes('BUG')) bugCount++;
-      if (labels.includes('FEATURE')) featureCount++;
-      if (labels.includes('REVISION')) revisionCount++;
-    }
-  });
+  if (labelsCol && columnMetaMap.has(labelsCol)) {
+    filteredRows.forEach(row => {
+      const labels = row[labelsCol];
+      if (Array.isArray(labels)) {
+        if (labels.includes('BUG')) bugCount++;
+        if (labels.includes('FEATURE')) featureCount++;
+        if (labels.includes('REVISION')) revisionCount++;
+      } else if (typeof labels === 'string') {
+        const up = labels.toUpperCase();
+        if (up.includes('BUG')) bugCount++;
+        if (up.includes('FEATURE')) featureCount++;
+        if (up.includes('REVISION')) revisionCount++;
+      }
+    });
+  }
 
-  const jiraCharts: ChartConfig[] = [
+  const candidateJiraCharts: ChartConfig[] = [
     {
       id: 'jira_status_funnel',
       title: 'İş Akış Durum Pipeline Dağılımı',
       type: 'bar_horizontal',
-      xAxisCol: dataset.jiraFields?.statusCol || 'Durum',
+      xAxisCol: dataset.jiraFields?.statusCol || '',
       aggregation: 'count',
       colorPalette: 'technical',
       sortBy: 'value_desc',
@@ -63,7 +73,7 @@ export const JiraAnalyticsView: React.FC<JiraAnalyticsViewProps> = ({
       id: 'jira_assignee_workload',
       title: 'Yazılımcı / Atanan Kişi İş Dağılımı',
       type: 'bar_horizontal',
-      xAxisCol: dataset.jiraFields?.assigneeCol || 'Atanan Kişi',
+      xAxisCol: dataset.jiraFields?.assigneeCol || '',
       aggregation: 'count',
       colorPalette: 'cyber',
       sortBy: 'value_desc',
@@ -73,7 +83,7 @@ export const JiraAnalyticsView: React.FC<JiraAnalyticsViewProps> = ({
       id: 'jira_dept_demand',
       title: 'Talep Eden Departman Dağılımı',
       type: 'donut',
-      xAxisCol: dataset.jiraFields?.departmentCol || 'Özel alan (Talep Eden Departman)',
+      xAxisCol: dataset.jiraFields?.departmentCol || '',
       aggregation: 'count',
       colorPalette: 'warm',
       topN: 8,
@@ -82,7 +92,7 @@ export const JiraAnalyticsView: React.FC<JiraAnalyticsViewProps> = ({
       id: 'jira_priority_radar',
       title: 'Öncelik Seviyesi Radarı',
       type: 'radar',
-      xAxisCol: dataset.jiraFields?.priorityCol || 'Öncelik',
+      xAxisCol: dataset.jiraFields?.priorityCol || '',
       aggregation: 'count',
       colorPalette: 'technical',
     },
@@ -90,11 +100,15 @@ export const JiraAnalyticsView: React.FC<JiraAnalyticsViewProps> = ({
       id: 'jira_type_comp',
       title: 'Konu Türü Sınıflandırması',
       type: 'donut',
-      xAxisCol: dataset.jiraFields?.typeCol || 'Konu Türü',
+      xAxisCol: dataset.jiraFields?.typeCol || '',
       aggregation: 'count',
       colorPalette: 'emerald',
     },
   ];
+
+  const jiraCharts = candidateJiraCharts.filter(
+    cfg => cfg.xAxisCol && columnMetaMap.has(cfg.xAxisCol)
+  );
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -182,6 +196,7 @@ export const JiraAnalyticsView: React.FC<JiraAnalyticsViewProps> = ({
               rows={filteredRows}
               columnMetaMap={columnMetaMap}
               height={270}
+              onElementClick={onChartElementClick}
             />
           </div>
         ))}

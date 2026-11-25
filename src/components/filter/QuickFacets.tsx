@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Check, X, Search, ChevronsLeft, ChevronsRight, Filter } from 'lucide-react';
-import { ColumnMeta } from '../../types';
+import { ColumnMeta, Dataset } from '../../types';
 import { useLanguage } from '../../i18n/LanguageContext';
 
 interface QuickFacetsProps {
   columns: ColumnMeta[];
+  jiraFields?: Dataset['jiraFields'];
   selectedFacets: Record<string, string[]>;
   onToggleFacetValue: (columnKey: string, value: string) => void;
   onClearFacetColumn: (columnKey: string) => void;
@@ -41,7 +42,14 @@ const PRIORITY_FACET_KEYS = [
   'etiketler',
 ];
 
-function getFriendlyFacetLabel(col: ColumnMeta): string {
+function getFriendlyFacetLabel(col: ColumnMeta, jiraFields?: Dataset['jiraFields']): string {
+  if (jiraFields?.statusCol === col.key) return `Durum (${col.label})`;
+  if (jiraFields?.priorityCol === col.key) return `Öncelik (${col.label})`;
+  if (jiraFields?.typeCol === col.key) return `Konu Türü (${col.label})`;
+  if (jiraFields?.departmentCol === col.key) return 'Departman';
+  if (jiraFields?.assigneeCol === col.key) return 'Yazılımcı (Atanan)';
+  if (jiraFields?.environmentCol === col.key) return 'Ortam';
+  if (jiraFields?.labelsCol === col.key) return 'Etiketler';
   const lk = col.key.toLowerCase();
   if (lk.includes('talep eden departman') || lk === 'department') return 'Departman';
   if (lk === 'atanan kişi' || lk === 'assignee') return 'Yazılımcı (Atanan)';
@@ -53,6 +61,7 @@ function getFriendlyFacetLabel(col: ColumnMeta): string {
 
 export const QuickFacets: React.FC<QuickFacetsProps> = ({
   columns,
+  jiraFields,
   selectedFacets,
   onToggleFacetValue,
   onClearFacetColumn,
@@ -65,10 +74,25 @@ export const QuickFacets: React.FC<QuickFacetsProps> = ({
   const [facetSearches, setFacetSearches] = useState<Record<string, string>>({});
 
   const facetColumns = useMemo(() => {
+    const mappedPriorityKeys = [
+      jiraFields?.statusCol,
+      jiraFields?.priorityCol,
+      jiraFields?.typeCol,
+      jiraFields?.departmentCol,
+      jiraFields?.assigneeCol,
+      jiraFields?.environmentCol,
+      jiraFields?.labelsCol,
+    ].filter(Boolean) as string[];
+    const mappedSet = new Set(mappedPriorityKeys);
+
     const candidates = columns.filter(c => {
       if (c.key.startsWith('_derived_')) return false;
       const lk = c.key.toLowerCase();
       const lLabel = c.label.toLowerCase();
+
+      if (mappedSet.has(c.key)) {
+        return c.topValues.length > 0 || c.missingCount > 0;
+      }
 
       // Explicitly exclude project metadata & IDs
       if (EXCLUDED_PATTERNS.some(pat => lk.includes(pat) || lLabel.includes(pat))) {
@@ -98,8 +122,13 @@ export const QuickFacets: React.FC<QuickFacetsProps> = ({
       );
     });
 
-    // Sort so priority facets (Durum, Öncelik, Konu Türü, Departman, Yazılımcı, Ortam, Etiketler) appear first
+    // Sort so user-assigned main filter groups & priority facets appear first
     candidates.sort((a, b) => {
+      const mA = mappedPriorityKeys.indexOf(a.key);
+      const mB = mappedPriorityKeys.indexOf(b.key);
+      if (mA !== -1 || mB !== -1) {
+        return (mA === -1 ? 999 : mA) - (mB === -1 ? 999 : mB);
+      }
       const aIdx = PRIORITY_FACET_KEYS.findIndex(pk => a.key.toLowerCase().includes(pk));
       const bIdx = PRIORITY_FACET_KEYS.findIndex(pk => b.key.toLowerCase().includes(pk));
       const aRank = aIdx === -1 ? 999 : aIdx;
@@ -108,7 +137,7 @@ export const QuickFacets: React.FC<QuickFacetsProps> = ({
     });
 
     return candidates.slice(0, 8);
-  }, [columns]);
+  }, [columns, jiraFields]);
 
   const toggleCollapse = (key: string) => {
     setCollapsedCols(prev => ({ ...prev, [key]: !prev[key] }));
@@ -124,7 +153,7 @@ export const QuickFacets: React.FC<QuickFacetsProps> = ({
       <div
         onClick={onToggleCollapse}
         title="Hızlı Filtreleri Aç"
-        className="w-10 bg-[#0a0d12] border-r border-white/[0.06] flex flex-col items-center py-3 cursor-pointer hover:bg-white/[0.02] transition-all duration-200 select-none flex-shrink-0 group"
+        className="w-10 bg-[#0a0d12] border-r border-white/[0.06] flex flex-col items-center py-3 cursor-pointer hover:bg-white/[0.02] transition-all duration-200 select-none flex-shrink-0 group no-print"
       >
         <button
           type="button"
@@ -152,7 +181,7 @@ export const QuickFacets: React.FC<QuickFacetsProps> = ({
   }
 
   return (
-    <div className="w-64 bg-[#0a0d12] border-r border-white/[0.06] flex flex-col h-full select-none transition-all duration-200 flex-shrink-0">
+    <div className="w-64 bg-[#0a0d12] border-r border-white/[0.06] flex flex-col h-full select-none transition-all duration-200 flex-shrink-0 no-print">
       <div className="p-3 border-b border-white/[0.06] flex items-center justify-between">
         <div className="text-2xs font-mono uppercase tracking-widest text-slate-400 font-semibold truncate">
           {t.quickFacets}
@@ -182,14 +211,18 @@ export const QuickFacets: React.FC<QuickFacetsProps> = ({
           const isCollapsed = collapsedCols[col.key];
           const selected = selectedFacets[col.key] || [];
           const searchQuery = (facetSearches[col.key] || '').toLocaleLowerCase('tr-TR');
-          const friendlyLabel = getFriendlyFacetLabel(col);
+          const friendlyLabel = getFriendlyFacetLabel(col, jiraFields);
 
           // Combine topValues with "(Boş)" if column has missing values and is Departman / Yazılımcı
           const allOptions = [...col.topValues];
           const lk = col.key.toLowerCase();
           if (
             col.missingCount > 0 &&
-            (lk.includes('talep eden departman') || lk === 'atanan kişi' || lk === 'assignee')
+            (jiraFields?.departmentCol === col.key ||
+              jiraFields?.assigneeCol === col.key ||
+              lk.includes('talep eden departman') ||
+              lk === 'atanan kişi' ||
+              lk === 'assignee')
           ) {
             allOptions.push({ value: '', count: col.missingCount });
           }

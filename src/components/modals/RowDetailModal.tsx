@@ -16,20 +16,27 @@ export const RowDetailModal: React.FC<RowDetailModalProps> = ({ row, dataset, on
 
   if (!row) return null;
 
-  const handleCopyJson = () => {
-    navigator.clipboard.writeText(JSON.stringify(row, null, 2));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const activeCols = dataset.columns.filter(c => !c.key.startsWith('_derived_'));
+  const activeKeySet = new Set(activeCols.map(c => c.key));
 
   const issueKey = dataset.jiraFields?.keyCol ? row[dataset.jiraFields.keyCol] : row._id;
   const summary = dataset.jiraFields?.summaryCol ? row[dataset.jiraFields.summaryCol] : '';
 
-  // Filter keys
-  const entries = Object.entries(row).filter(([k]) => !k.startsWith('_derived_') && k !== '_id');
+  const handleCopyJson = () => {
+    const filteredObj: Record<string, any> = {};
+    activeCols.forEach(c => {
+      filteredObj[c.key] = row[c.key];
+    });
+    navigator.clipboard.writeText(JSON.stringify(filteredObj, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Show only selected/active columns
+  const entries = activeCols.map(c => [c.key, row[c.key]] as [string, any]).filter(([k]) => activeKeySet.has(k));
   const filteredEntries = entries.filter(([k, v]) => {
     const q = filterText.toLowerCase();
-    return k.toLowerCase().includes(q) || String(v).toLowerCase().includes(q);
+    return k.toLowerCase().includes(q) || String(v ?? '').toLowerCase().includes(q);
   });
 
   return (

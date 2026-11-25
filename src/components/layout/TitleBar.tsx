@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Minus, Square, X, UploadCloud, FileSpreadsheet, HardDrive, Database, Sun, Moon, Edit3, Check } from 'lucide-react';
+import { Minus, Square, X, UploadCloud, FileSpreadsheet, HardDrive, Database, Sun, Moon, Edit3, Check, Search, Columns } from 'lucide-react';
 import { Dataset } from '../../types';
 import { useLanguage } from '../../i18n/LanguageContext';
 import { useTheme } from '../../theme/ThemeContext';
+import { getSelectableColumns } from '../../core/parser';
 
 interface TitleBarProps {
   currentDataset: Dataset | null;
@@ -10,6 +11,8 @@ interface TitleBarProps {
   onSelectDataset: (id: string) => void;
   onRenameDataset: (id: string, newName: string) => void;
   onOpenDatasetManager: () => void;
+  onOpenColumnSelection: () => void;
+  onOpenCommandPalette: () => void;
   onImportClick: () => void;
   onLoadDesktopJira: () => void;
   loading: boolean;
@@ -21,11 +24,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onSelectDataset,
   onRenameDataset,
   onOpenDatasetManager,
+  onOpenColumnSelection,
+  onOpenCommandPalette,
   onImportClick,
   onLoadDesktopJira,
   loading
 }) => {
   const electronAPI = (window as any).electronAPI;
+  const isMac =
+    electronAPI?.platform === 'darwin' ||
+    (typeof navigator !== 'undefined' &&
+      /Mac|iPod|iPhone|iPad/i.test(navigator.platform || navigator.userAgent));
   const { language, setLanguage, t } = useLanguage();
   const { theme, toggleTheme } = useTheme();
   const [isRenaming, setIsRenaming] = useState(false);
@@ -57,9 +66,12 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   };
 
   return (
-    <div className="h-10 w-full bg-[#07080b] border-b border-white/[0.06] flex items-center justify-between px-3 window-drag-region select-none z-50">
+    <div
+      onDoubleClick={isMac ? handleMaximize : undefined}
+      className="h-10 w-full bg-[#07080b] border-b border-white/[0.06] flex items-center justify-between px-3 window-drag-region select-none z-50 no-print"
+    >
       {/* Brand & Active Dataset Switcher */}
-      <div className="flex items-center space-x-3 window-no-drag">
+      <div className={`flex items-center space-x-3 window-no-drag ${isMac ? 'pl-20' : ''}`}>
         <div className="flex items-center space-x-2">
           <div className="w-4 h-4 rounded-sm bg-cyan-500/20 border border-cyan-500/50 flex items-center justify-center">
             <div className="w-1.5 h-1.5 bg-cyan-400 rounded-2xs" />
@@ -127,6 +139,19 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             <Database className="w-3 h-3 text-cyan-400" />
             <span>Veri Setleri ({datasets.length})</span>
           </button>
+
+          {currentDataset && (
+            <button
+              onClick={onOpenColumnSelection}
+              className="flex items-center space-x-1 px-2 py-0.5 text-2xs font-mono text-slate-300 hover:text-cyan-300 bg-white/[0.03] hover:bg-cyan-950/30 border border-white/[0.08] hover:border-cyan-500/30 rounded transition-colors"
+              title="Aktif Veri Setinde Kullanılacak Kolonları Seç / Düzenle"
+            >
+              <Columns className="w-3 h-3 text-cyan-400" />
+              <span>
+                Kolonlar ({currentDataset.selectedColumnKeys?.length ?? currentDataset.columns.filter(c => !c.key.startsWith('_derived_')).length}/{getSelectableColumns(currentDataset).length})
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -150,6 +175,19 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         >
           <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
           <span>{t.loadDesktopJira}</span>
+        </button>
+
+        {/* Command Palette Trigger (Ctrl+K / Cmd+K) */}
+        <button
+          onClick={onOpenCommandPalette}
+          className="flex items-center space-x-1.5 px-2 py-1 text-2xs font-mono text-slate-400 hover:text-white bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.08] rounded transition-colors"
+          title={`Komut Paleti & Global Arama (${isMac ? '⌘K' : 'Ctrl+K'})`}
+        >
+          <Search className="w-3 h-3 text-cyan-400" />
+          <span>Ara</span>
+          <span className="px-1 py-0.2 bg-white/[0.06] rounded text-[9px] text-slate-400">
+            {isMac ? '⌘K' : 'Ctrl+K'}
+          </span>
         </button>
 
         {/* Theme Mode Toggle (Light / Dark) */}
@@ -198,30 +236,34 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         </div>
       </div>
 
-      {/* Native-style Window Controls */}
-      <div className="flex items-center window-no-drag space-x-1">
-        <button
-          onClick={handleMinimize}
-          className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] rounded transition-colors"
-          title={t.minimize}
-        >
-          <Minus className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={handleMaximize}
-          className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] rounded transition-colors"
-          title={t.maximize}
-        >
-          <Square className="w-3 h-3" />
-        </button>
-        <button
-          onClick={handleClose}
-          className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
-          title={t.close}
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      {/* Native-style Window Controls (Windows / Linux; macOS uses native traffic lights) */}
+      {!isMac ? (
+        <div className="flex items-center window-no-drag space-x-1">
+          <button
+            onClick={handleMinimize}
+            className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] rounded transition-colors"
+            title={t.minimize}
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleMaximize}
+            className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] rounded transition-colors"
+            title={t.maximize}
+          >
+            <Square className="w-3 h-3" />
+          </button>
+          <button
+            onClick={handleClose}
+            className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
+            title={t.close}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ) : (
+        <div className="w-4" />
+      )}
     </div>
   );
 };

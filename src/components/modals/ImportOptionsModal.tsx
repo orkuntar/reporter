@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, GitMerge, RefreshCw, PlusSquare, ShieldCheck, Calendar, FileSpreadsheet } from 'lucide-react';
+import { X, GitMerge, RefreshCw, PlusSquare, ShieldCheck, Calendar, FileSpreadsheet, Columns } from 'lucide-react';
 import { Dataset } from '../../types';
 import { useLanguage } from '../../i18n/LanguageContext';
+import { getSelectableColumns } from '../../core/parser';
 
 interface ImportOptionsModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface ImportOptionsModalProps {
   onConfirmAddNew: (customName?: string) => void;
   onConfirmMerge: () => void;
   onConfirmReplace: (customName?: string) => void;
+  onEditColumns: () => void;
 }
 
 export const ImportOptionsModal: React.FC<ImportOptionsModalProps> = ({
@@ -21,6 +23,7 @@ export const ImportOptionsModal: React.FC<ImportOptionsModalProps> = ({
   onConfirmAddNew,
   onConfirmMerge,
   onConfirmReplace,
+  onEditColumns,
 }) => {
   const { t } = useLanguage();
   const [customName, setCustomName] = useState(incomingDataset.name);
@@ -92,6 +95,22 @@ export const ImportOptionsModal: React.FC<ImportOptionsModalProps> = ({
               <div className="flex items-center justify-between text-slate-400">
                 <span>Mevcut Aktif Veri Seti:</span>
                 <span className="text-slate-300">{activeDataset.name} ({activeDataset.rows.length.toLocaleString()} kayıt)</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-white/[0.04]">
+                <span>Seçilen Kolon Sayısı:</span>
+                <div className="flex items-center space-x-2">
+                  <span className="text-cyan-300 font-semibold">
+                    {incomingDataset.selectedColumnKeys?.length ?? incomingDataset.columns.filter(c => !c.key.startsWith('_derived_')).length} / {getSelectableColumns(incomingDataset).length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onEditColumns}
+                    className="flex items-center space-x-1 px-2 py-0.5 rounded bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-500/35 text-cyan-300 transition-colors"
+                  >
+                    <Columns className="w-3 h-3" />
+                    <span>Kolonları Düzenle</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -20,7 +20,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   const percentage = totalCount > 0 ? Math.round((filteredCount / totalCount) * 1000) / 10 : 0;
 
   return (
-    <footer className="h-7 w-full bg-[#07080b] border-t border-white/[0.06] flex items-center justify-between px-3 text-2xs font-mono text-slate-400 select-none">
+    <footer className="h-7 w-full bg-[#07080b] border-t border-white/[0.06] flex items-center justify-between px-3 text-2xs font-mono text-slate-400 select-none no-print">
       <div className="flex items-center space-x-4">
         <div className="flex items-center space-x-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -30,7 +30,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         {dataset && (
           <div className="flex items-center space-x-1 text-slate-400 border-l border-white/10 pl-4">
             <span>{t.columns}:</span>
-            <span className="text-slate-200">{dataset.columns.length}</span>
+            <span className="text-slate-200">
+              {dataset.selectedColumnKeys?.length ?? dataset.columns.filter(c => !c.key.startsWith('_derived_')).length}
+              {dataset.allColumns ? ` / ${dataset.allColumns.filter(c => !c.key.startsWith('_derived_')).length}` : ''}
+            </span>
           </div>
         )}
 

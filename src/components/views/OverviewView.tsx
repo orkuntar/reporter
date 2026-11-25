@@ -5,7 +5,9 @@ import {
   AlertTriangle,
   Layers,
   ClipboardCheck,
-  ArrowRight
+  ArrowRight,
+  Pin,
+  X
 } from 'lucide-react';
 import { AppView, ChartConfig, ColumnMeta, Dataset, DataRow } from '../../types';
 import { ChartRenderer } from '../charts/ChartRenderer';
@@ -16,16 +18,22 @@ interface OverviewViewProps {
   dataset: Dataset;
   filteredRows: DataRow[];
   columnMetaMap: Map<string, ColumnMeta>;
+  pinnedCharts: ChartConfig[];
+  onUnpinChart: (id: string) => void;
   onNavigateToView: (view: AppView) => void;
   onSelectRow: (row: DataRow) => void;
+  onChartElementClick?: (columnKey: string, value: string) => void;
 }
 
 export const OverviewView: React.FC<OverviewViewProps> = ({
   dataset,
   filteredRows,
   columnMetaMap,
+  pinnedCharts,
+  onUnpinChart,
   onNavigateToView,
   onSelectRow,
+  onChartElementClick,
 }) => {
   const { t } = useLanguage();
   const isJira = dataset.sourceType === 'jira';
@@ -42,30 +50,43 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   let leadTimeSum = 0;
   let leadTimeCount = 0;
   const assignees = new Set<string>();
-  const statusCol = dataset.jiraFields?.statusCol || 'Durum';
+  const statusCol = dataset.jiraFields?.statusCol;
+  const hasStatusCol = Boolean(statusCol && columnMetaMap.has(statusCol));
+  const hasStatusBucket = columnMetaMap.has('_derived_status_bucket');
+  const hasLeadTime = columnMetaMap.has('_derived_lead_time_days');
+  const priorityCol = dataset.jiraFields?.priorityCol;
+  const hasPriorityCol = Boolean(priorityCol && columnMetaMap.has(priorityCol));
+  const assigneeCol = dataset.jiraFields?.assigneeCol;
+  const hasAssigneeCol = Boolean(assigneeCol && columnMetaMap.has(assigneeCol));
 
   filteredRows.forEach(row => {
-    const bucket = row['_derived_status_bucket'] || '';
-    const rawStatus = String(row[statusCol] || '').trim().toLowerCase();
-    if (rawStatus === 'tamam' || rawStatus === 'tamamlandı' || bucket === 'Tamamlandı') {
-      tamamCount++;
-    }
-    if (bucket === 'Tamamlandı') completedCount++;
-    else if (bucket === 'Devam Ediyor') inProgressCount++;
-    else if (bucket === 'İptal Edildi') cancelledCount++;
-    else todoCount++;
-
-    const pScore = row['_derived_priority_score'];
-    if (pScore >= 4) highPriorityCount++;
-
-    const lt = row['_derived_lead_time_days'];
-    if (typeof lt === 'number' && !isNaN(lt)) {
-      leadTimeSum += lt;
-      leadTimeCount++;
+    if (hasStatusCol && statusCol) {
+      const bucket = hasStatusBucket ? row['_derived_status_bucket'] || '' : '';
+      const rawStatus = String(row[statusCol] || '').trim().toLowerCase();
+      if (rawStatus === 'tamam' || rawStatus === 'tamamlandı' || bucket === 'Tamamlandı') {
+        tamamCount++;
+      }
+      if (bucket === 'Tamamlandı') completedCount++;
+      else if (bucket === 'Devam Ediyor') inProgressCount++;
+      else if (bucket === 'İptal Edildi') cancelledCount++;
+      else todoCount++;
     }
 
-    if (dataset.jiraFields?.assigneeCol) {
-      const a = row[dataset.jiraFields.assigneeCol];
+    if (hasPriorityCol && columnMetaMap.has('_derived_priority_score')) {
+      const pScore = row['_derived_priority_score'];
+      if (pScore >= 4) highPriorityCount++;
+    }
+
+    if (hasLeadTime) {
+      const lt = row['_derived_lead_time_days'];
+      if (typeof lt === 'number' && !isNaN(lt)) {
+        leadTimeSum += lt;
+        leadTimeCount++;
+      }
+    }
+
+    if (hasAssigneeCol && assigneeCol) {
+      const a = row[assigneeCol];
       if (a && String(a).trim()) assignees.add(String(a).trim());
     }
   });
@@ -74,27 +95,27 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     avgLeadTime = Math.round((leadTimeSum / leadTimeCount) * 10) / 10;
   }
 
-  const completionRate = total > 0 ? Math.round((completedCount / total) * 1000) / 10 : 0;
+  const completionRate = hasStatusCol && total > 0 ? Math.round((completedCount / total) * 1000) / 10 : 0;
   const pctDone = total > 0 ? (completedCount / total) * 100 : 0;
   const pctProg = total > 0 ? (inProgressCount / total) * 100 : 0;
   const pctTodo = total > 0 ? (todoCount / total) * 100 : 0;
   const pctCancel = total > 0 ? (cancelledCount / total) * 100 : 0;
 
-  // 8 Logical Monday-style + Etiket Overview Charts
-  const overviewCharts: ChartConfig[] = [
+  // Logical Monday-style + Etiket Overview Charts strictly restricted to selected columns
+  const candidateJiraCharts: ChartConfig[] = [
     {
       id: 'ov_status',
-      title: isJira ? 'Durum Dağılımı (Status)' : 'Birincil Dağılım',
+      title: 'Durum Dağılımı (Status)',
       type: 'donut',
-      xAxisCol: isJira ? '_derived_status_bucket' : dataset.columns[0]?.key || '',
+      xAxisCol: hasStatusBucket ? '_derived_status_bucket' : (statusCol || ''),
       aggregation: 'count',
       colorPalette: 'technical',
     },
     {
       id: 'ov_labels',
-      title: isJira ? 'Etiket Dağılımı (Labels)' : 'Etiket Analizi',
+      title: 'Etiket Dağılımı (Labels)',
       type: 'bar_horizontal',
-      xAxisCol: dataset.jiraFields?.labelsCol || '_merged_Etiketler',
+      xAxisCol: dataset.jiraFields?.labelsCol || '',
       aggregation: 'count',
       colorPalette: 'cyber',
       sortBy: 'value_desc',
@@ -102,10 +123,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     },
     {
       id: 'ov_dept_status',
-      title: isJira ? 'Departman x Durum Dağılımı (Board)' : 'Grup Kırılımı',
+      title: 'Departman x Durum Dağılımı (Board)',
       type: 'bar_stacked',
-      xAxisCol: dataset.jiraFields?.departmentCol || dataset.columns[3]?.key || '',
-      groupByCol: isJira ? '_derived_status_bucket' : undefined,
+      xAxisCol: dataset.jiraFields?.departmentCol || '',
+      groupByCol: hasStatusBucket ? '_derived_status_bucket' : undefined,
       aggregation: 'count',
       colorPalette: 'technical',
       sortBy: 'value_desc',
@@ -113,10 +134,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     },
     {
       id: 'ov_workload',
-      title: isJira ? 'Yazılımcı İş Yükü & Durum Dengesi' : 'Atama Dengesi',
+      title: 'Yazılımcı İş Yükü & Durum Dengesi',
       type: 'bar_horizontal',
-      xAxisCol: dataset.jiraFields?.assigneeCol || dataset.columns[4]?.key || '',
-      groupByCol: isJira ? '_derived_status_bucket' : undefined,
+      xAxisCol: dataset.jiraFields?.assigneeCol || '',
+      groupByCol: hasStatusBucket ? '_derived_status_bucket' : undefined,
       stackedSeries: true,
       aggregation: 'count',
       colorPalette: 'emerald',
@@ -125,10 +146,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     },
     {
       id: 'ov_weekly_velocity',
-      title: isJira ? 'Haftalık İş Akışı Trendi (Velocity)' : 'Zaman Bazlı Trend',
+      title: 'Haftalık İş Akışı Trendi (Velocity)',
       type: 'area',
-      xAxisCol: dataset.jiraFields?.startDateCol || dataset.jiraFields?.createdCol || 'Oluşturulan',
-      groupByCol: isJira ? '_derived_status_bucket' : undefined,
+      xAxisCol: dataset.jiraFields?.startDateCol || dataset.jiraFields?.createdCol || '',
+      groupByCol: hasStatusBucket ? '_derived_status_bucket' : undefined,
       dateGranularity: 'week',
       stackedSeries: true,
       aggregation: 'count',
@@ -137,9 +158,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     },
     {
       id: 'ov_priority',
-      title: isJira ? 'Öncelik Seviyeleri (Priority)' : 'İkincil Kırılım',
+      title: 'Öncelik Seviyeleri (Priority)',
       type: 'bar_vertical',
-      xAxisCol: dataset.jiraFields?.priorityCol || dataset.columns[1]?.key || '',
+      xAxisCol: dataset.jiraFields?.priorityCol || '',
       aggregation: 'count',
       colorPalette: 'warm',
       sortBy: 'value_desc',
@@ -147,9 +168,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     },
     {
       id: 'ov_type',
-      title: isJira ? 'Konu Türü (Issue Type)' : 'Boyut Dağılımı',
+      title: 'Konu Türü (Issue Type)',
       type: 'bar_horizontal',
-      xAxisCol: dataset.jiraFields?.typeCol || dataset.columns[2]?.key || '',
+      xAxisCol: dataset.jiraFields?.typeCol || '',
       aggregation: 'count',
       colorPalette: 'cyber',
       sortBy: 'value_desc',
@@ -157,15 +178,36 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     },
     {
       id: 'ov_department',
-      title: isJira ? 'Talep Eden Departmanlar' : 'Kategori Hacmi',
+      title: 'Talep Eden Departmanlar',
       type: 'bar_vertical',
-      xAxisCol: dataset.jiraFields?.departmentCol || dataset.columns[3]?.key || '',
+      xAxisCol: dataset.jiraFields?.departmentCol || '',
       aggregation: 'count',
       colorPalette: 'emerald',
       sortBy: 'value_desc',
       topN: 8,
     },
   ];
+
+  const validJiraCharts = candidateJiraCharts.filter(
+    cfg => cfg.xAxisCol && columnMetaMap.has(cfg.xAxisCol) && (!cfg.groupByCol || columnMetaMap.has(cfg.groupByCol))
+  );
+
+  // If user selected custom/non-Jira columns, dynamically generate overview charts from checked columns
+  const selectableActiveCols = dataset.columns.filter(c => !c.key.startsWith('_derived_'));
+  const overviewCharts: ChartConfig[] =
+    validJiraCharts.length > 0
+      ? validJiraCharts
+      : selectableActiveCols.slice(0, 6).map((col, idx) => ({
+          id: `ov_dynamic_${idx}`,
+          title: `${col.label} Dağılımı`,
+          type: col.type === 'date' || col.isDateColumn ? 'area' : idx % 3 === 0 ? 'donut' : idx % 2 === 0 ? 'bar_vertical' : 'bar_horizontal',
+          xAxisCol: col.key,
+          dateGranularity: col.type === 'date' || col.isDateColumn ? 'week' : undefined,
+          aggregation: 'count',
+          colorPalette: (['technical', 'cyber', 'emerald', 'warm'] as const)[idx % 4],
+          sortBy: col.type === 'date' || col.isDateColumn ? 'date_asc' : 'value_desc',
+          topN: 10,
+        }));
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -186,7 +228,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
 
         <div className="flex items-center space-x-3 text-2xs font-mono text-slate-400">
-          {isJira && (
+          {isJira && hasStatusCol && (
             <button
               onClick={() => onNavigateToView('audit_report')}
               className="flex items-center space-x-1.5 px-2.5 py-1 bg-amber-950/30 hover:bg-amber-900/40 border border-amber-500/35 text-amber-300 rounded transition-colors"
@@ -228,11 +270,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="mt-2 text-2xl font-bold font-mono text-white tracking-tight">
-            %{completionRate}
+            {hasStatusCol ? `%${completionRate}` : '—'}
           </div>
           <div className="mt-1 text-2xs font-mono text-slate-400 flex items-center justify-between">
-            <span>{completedCount} {t.completed}</span>
-            <span className="text-emerald-400">{inProgressCount} {t.inProgress}</span>
+            <span>{hasStatusCol ? `${completedCount} ${t.completed}` : 'Durum kolonu pasif'}</span>
+            <span className="text-emerald-400">{hasStatusCol ? `${inProgressCount} ${t.inProgress}` : ''}</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500/30" />
         </div>
@@ -249,9 +291,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <span className="text-2xl font-bold font-mono text-white tracking-tight">
               {avgLeadTime > 0 ? `${avgLeadTime} gün` : 'N/A'}
             </span>
-            <span className="text-xs font-mono text-emerald-400 font-semibold">
-              ({tamamCount.toLocaleString()} Tamam)
-            </span>
+            {hasStatusCol && (
+              <span className="text-xs font-mono text-emerald-400 font-semibold">
+                ({tamamCount.toLocaleString()} Tamam)
+              </span>
+            )}
           </div>
           <div className="mt-1 text-2xs font-mono text-slate-400 flex items-center justify-between">
             <span>{t.cycleDuration}</span>
@@ -269,18 +313,18 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <AlertTriangle className="w-4 h-4 text-amber-400" />
           </div>
           <div className="mt-2 text-2xl font-bold font-mono text-white tracking-tight">
-            {highPriorityCount}
+            {hasPriorityCol ? highPriorityCount : '—'}
           </div>
           <div className="mt-1 text-2xs font-mono text-slate-400 flex items-center justify-between">
-            <span>Highest & High</span>
-            <span className="text-amber-400">{assignees.size} {t.activeAssignees}</span>
+            <span>{hasPriorityCol ? 'Highest & High' : 'Öncelik kolonu pasif'}</span>
+            <span className="text-amber-400">{hasAssigneeCol ? `${assignees.size} ${t.activeAssignees}` : ''}</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500/30" />
         </div>
       </div>
 
       {/* Monday-Style Status Battery Progress Strip */}
-      {isJira && total > 0 && (
+      {isJira && hasStatusCol && total > 0 && (
         <div className="bg-[#0f1219] border border-white/[0.07] rounded-md p-4 space-y-2.5">
           <div className="flex items-center justify-between text-2xs font-mono">
             <span className="uppercase tracking-wider text-slate-400 font-semibold">
@@ -359,10 +403,54 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               rows={filteredRows}
               columnMetaMap={columnMetaMap}
               height={280}
+              onElementClick={onChartElementClick}
             />
           </div>
         ))}
       </div>
+
+      {/* Pinned Custom Charts Section */}
+      {pinnedCharts.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center space-x-2 text-2xs font-mono uppercase tracking-widest text-emerald-400 font-semibold">
+            <Pin className="w-3.5 h-3.5" />
+            <span>Sabitlenen Özel Grafikler ({pinnedCharts.length})</span>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {pinnedCharts.map((cfg) => (
+              <div
+                key={cfg.id}
+                className="bg-[#0f1219] border border-emerald-500/25 rounded-md p-4 flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between border-b border-white/[0.06] pb-2.5 mb-2">
+                  <span className="text-xs font-mono font-semibold text-slate-200">
+                    {cfg.title}
+                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-2xs font-mono uppercase text-emerald-400 bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-500/30">
+                      {cfg.type.replace('_', ' ')}
+                    </span>
+                    <button
+                      onClick={() => onUnpinChart(cfg.id)}
+                      className="p-1 text-slate-400 hover:text-rose-400 rounded transition-colors no-print"
+                      title="Genel Bakıştan Kaldır"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <ChartRenderer
+                  config={cfg}
+                  rows={filteredRows}
+                  columnMetaMap={columnMetaMap}
+                  height={280}
+                  onElementClick={onChartElementClick}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Dedicated Filtered Raw Data Table */}
       <div className="pt-2">

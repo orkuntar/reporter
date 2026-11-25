@@ -3,6 +3,7 @@ import { TitleBar } from './components/layout/TitleBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { StatusBar } from './components/layout/StatusBar';
 import { DateFilterBar } from './components/filter/DateFilterBar';
+import { ActiveFilterBar } from './components/filter/ActiveFilterBar';
 import { QueryBuilder } from './components/filter/QueryBuilder';
 import { QuickFacets } from './components/filter/QuickFacets';
 import { OverviewView } from './components/views/OverviewView';
@@ -17,17 +18,111 @@ import { RowDetailModal } from './components/modals/RowDetailModal';
 import { ExportModal } from './components/modals/ExportModal';
 import { ImportOptionsModal } from './components/modals/ImportOptionsModal';
 import { DatasetManagerModal } from './components/modals/DatasetManagerModal';
-import { parseCsvFile, upsertDataset, computeColumnMetadata } from './core/parser';
+import { CommandPaletteModal } from './components/modals/CommandPaletteModal';
+import { ColumnSelectionModal } from './components/modals/ColumnSelectionModal';
+import {
+  parseCsvFile,
+  upsertDataset,
+  computeColumnMetadata,
+  decodeCsvArrayBuffer,
+  applyDatasetColumnSelection,
+  ensureDatasetColumnModel,
+} from './core/parser';
 import { filterDataset } from './core/filterEngine';
 import { loadSavedDatasets, persistDataset, removeSavedDataset } from './core/storage';
 import { AppView, ChartConfig, Dataset, DataRow, DateFilterState, FilterGroup, FilterPreset } from './types';
 import { LanguageProvider, useLanguage } from './i18n/LanguageContext';
-import { ThemeProvider } from './theme/ThemeContext';
+import { ThemeProvider, useTheme } from './theme/ThemeContext';
 import { UploadCloud, FileSpreadsheet, HardDrive, AlertCircle, ShieldCheck } from 'lucide-react';
+
+interface ComposerState {
+  charts: ChartConfig[];
+  title: string;
+  notes: string;
+}
+
+function getDefaultComposerCharts(ds: Dataset): ChartConfig[] {
+  const activeSet = new Set(ds.columns.map(c => c.key));
+  const charts: ChartConfig[] = [];
+
+  if (ds.jiraFields?.statusCol && activeSet.has(ds.jiraFields.statusCol)) {
+    charts.push({
+      id: 'c1',
+      title: 'İş Akış Durum Dağılımı',
+      type: 'bar_vertical',
+      xAxisCol: ds.jiraFields.statusCol,
+      aggregation: 'count',
+      colorPalette: 'technical',
+      sortBy: 'value_desc',
+      topN: 10,
+    });
+  }
+  if (ds.jiraFields?.priorityCol && activeSet.has(ds.jiraFields.priorityCol)) {
+    charts.push({
+      id: 'c2',
+      title: 'Öncelik Seviyeleri Dağılımı',
+      type: 'donut',
+      xAxisCol: ds.jiraFields.priorityCol,
+      aggregation: 'count',
+      colorPalette: 'warm',
+    });
+  }
+  if (activeSet.has('_derived_lead_time_days')) {
+    charts.push({
+      id: 'c3',
+      title: 'Çözüm Süresi (Gün)',
+      type: 'bar_vertical',
+      xAxisCol: '_derived_lead_time_days',
+      aggregation: 'count',
+      colorPalette: 'emerald',
+      topN: 10,
+    });
+  }
+  if (ds.jiraFields?.assigneeCol && activeSet.has(ds.jiraFields.assigneeCol)) {
+    charts.push({
+      id: 'c4',
+      title: 'Yazılımcı İş Dağılımı',
+      type: 'bar_horizontal',
+      xAxisCol: ds.jiraFields.assigneeCol,
+      aggregation: 'count',
+      colorPalette: 'cyber',
+      topN: 12,
+    });
+  }
+
+  if (charts.length > 0) return charts;
+
+  const fallbackCols = ds.columns.filter(c => !c.key.startsWith('_derived_'));
+  const firstCol = fallbackCols[0]?.key || ds.columns[0]?.key || '';
+  const secondCol = fallbackCols[1]?.key || firstCol;
+  const fallback: ChartConfig[] = [];
+  if (firstCol) {
+    fallback.push({
+      id: 'c1',
+      title: 'Birincil Kategori Dağılımı',
+      type: 'bar_vertical',
+      xAxisCol: firstCol,
+      aggregation: 'count',
+      colorPalette: 'technical',
+    });
+  }
+  if (secondCol) {
+    fallback.push({
+      id: 'c2',
+      title: 'Oransal Dağılım',
+      type: 'donut',
+      xAxisCol: secondCol,
+      aggregation: 'count',
+      colorPalette: 'cyber',
+    });
+  }
+  return fallback;
+}
 
 const MainApplication: React.FC = () => {
   const electronAPI = (window as any).electronAPI;
   const { t } = useLanguage();
+  const { toggleTheme } = useTheme();
 
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [activeDatasetId, setActiveDatasetId] = useState<string | null>(() => {
@@ -55,7 +150,7 @@ const MainApplication: React.FC = () => {
   });
   const [quickFacets, setQuickFacets] = useState<Record<string, string[]>>({});
   
-  // Dedicated Date Filter State with Başlangıç, Yapıma Başlandı, Bitiş Tarihi
+  // Dedicated Date Filter State
   const [dateFilter, setDateFilter] = useState<DateFilterState>({
     baselineCol: 'Özel alan (Başlangıç tarihi)',
     startDate: '',
@@ -73,15 +168,38 @@ const MainApplication: React.FC = () => {
     }
   });
 
-  // Composer Charts
-  const [composerCharts, setComposerCharts] = useState<ChartConfig[]>([]);
+  // Persistent Composer State per Dataset
+  const [composerByDataset, setComposerByDataset] = useState<Record<string, ComposerState>>(() => {
+    try {
+      const saved = localStorage.getItem('reporter_composer_layouts');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Persistent Pinned Overview Charts per Dataset
+  const [pinnedByDataset, setPinnedByDataset] = useState<Record<string, ChartConfig[]>>(() => {
+    try {
+      const saved = localStorage.getItem('reporter_pinned_charts');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // Modals & Collapsible Panels
   const [selectedRow, setSelectedRow] = useState<DataRow | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [stagedIncomingDataset, setStagedIncomingDataset] = useState<Dataset | null>(null);
   const [importOptionsOpen, setImportOptionsOpen] = useState(false);
+  const [columnModalOpen, setColumnModalOpen] = useState(false);
+  const [columnModalMode, setColumnModalMode] = useState<'import' | 'edit'>('edit');
+  const [columnModalInitialTab, setColumnModalInitialTab] = useState<'columns' | 'mapping'>('columns');
+  const [columnModalDataset, setColumnModalDataset] = useState<Dataset | null>(null);
   const [datasetManagerOpen, setDatasetManagerOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('reporter_sidebar_collapsed') === 'true';
@@ -96,6 +214,18 @@ const MainApplication: React.FC = () => {
       return false;
     }
   });
+
+  // Global Ctrl+K / Cmd+K shortcut for Command Palette
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
 
   useEffect(() => {
     try {
@@ -113,13 +243,28 @@ const MainApplication: React.FC = () => {
     }
   }, [facetsCollapsed]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('reporter_composer_layouts', JSON.stringify(composerByDataset));
+    } catch {
+      // ignore
+    }
+  }, [composerByDataset]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('reporter_pinned_charts', JSON.stringify(pinnedByDataset));
+    } catch {
+      // ignore
+    }
+  }, [pinnedByDataset]);
+
   // Resolve current active dataset
   const dataset = useMemo(() => {
     if (datasets.length === 0) return null;
     return datasets.find(d => d.id === activeDatasetId) || datasets[0];
   }, [datasets, activeDatasetId]);
 
-  // Persist activeDatasetId selection
   useEffect(() => {
     if (dataset?.id) {
       try {
@@ -136,7 +281,7 @@ const MainApplication: React.FC = () => {
     return new Map(dataset.columns.map(c => [c.key, c]));
   }, [dataset]);
 
-  // Compute filtered dataset
+  // Compute filtered dataset strictly using active/checked columns
   const filteredRows = useMemo(() => {
     if (!dataset) return [];
     return filterDataset(
@@ -146,10 +291,43 @@ const MainApplication: React.FC = () => {
       quickFacets,
       columnMetaMap,
       dateFilter,
-      dataset.jiraFields?.workStartDateCol || 'Özel alan (Yapım Başlama Tarihi)',
-      dataset.jiraFields?.dueCol || 'Bitiş tarihi'
+      dataset.jiraFields?.workStartDateCol,
+      dataset.jiraFields?.dueCol
     );
   }, [dataset, filterGroup, quickFacets, columnMetaMap, dateFilter]);
+
+  const activeComposer: ComposerState = useMemo(() => {
+    if (!dataset) {
+      return { charts: [], title: '', notes: '' };
+    }
+    const existing = composerByDataset[dataset.id];
+    if (existing) return existing;
+    return {
+      charts: getDefaultComposerCharts(dataset),
+      title: `${dataset.name} — Yönetici Analiz Raporu`,
+      notes: `Aktif veri kümesi kayıtlarından derlenmiş kapsamlı analiz raporu.`,
+    };
+  }, [dataset, composerByDataset]);
+
+  const activePinnedCharts = useMemo(() => {
+    if (!dataset) return [];
+    return pinnedByDataset[dataset.id] || [];
+  }, [dataset, pinnedByDataset]);
+
+  const updateActiveComposer = useCallback((partial: Partial<ComposerState>) => {
+    if (!dataset) return;
+    setComposerByDataset(prev => {
+      const current = prev[dataset.id] || {
+        charts: getDefaultComposerCharts(dataset),
+        title: `${dataset.name} — Yönetici Analiz Raporu`,
+        notes: `Aktif veri kümesi kayıtlarından derlenmiş kapsamlı analiz raporu.`,
+      };
+      return {
+        ...prev,
+        [dataset.id]: { ...current, ...partial },
+      };
+    });
+  }, [dataset]);
 
   // Calculate active filter count
   const isDateFilterActive = Boolean(
@@ -164,7 +342,6 @@ const MainApplication: React.FC = () => {
     Object.values(quickFacets).reduce((acc, curr) => acc + (curr ? curr.length : 0), 0) +
     (isDateFilterActive ? 1 : 0);
 
-  // Save presets to localStorage
   useEffect(() => {
     try {
       localStorage.setItem('reporter_presets', JSON.stringify(presets));
@@ -172,69 +349,6 @@ const MainApplication: React.FC = () => {
       console.error(e);
     }
   }, [presets]);
-
-  // Initialize report composer with default curated charts for the dataset
-  const initializeComposerCharts = useCallback((ds: Dataset) => {
-    if (ds.sourceType === 'jira') {
-      setComposerCharts([
-        {
-          id: 'c1',
-          title: 'İş Akış Durum Dağılımı',
-          type: 'bar_vertical',
-          xAxisCol: ds.jiraFields?.statusCol || 'Durum',
-          aggregation: 'count',
-          colorPalette: 'technical',
-          sortBy: 'value_desc',
-          topN: 10,
-        },
-        {
-          id: 'c2',
-          title: 'Öncelik Seviyeleri Dağılımı',
-          type: 'donut',
-          xAxisCol: ds.jiraFields?.priorityCol || 'Öncelik',
-          aggregation: 'count',
-          colorPalette: 'warm',
-        },
-        {
-          id: 'c3',
-          title: 'Çözüm Süresi (Gün)',
-          type: 'bar_vertical',
-          xAxisCol: '_derived_lead_time_days',
-          aggregation: 'count',
-          colorPalette: 'emerald',
-          topN: 10,
-        },
-        {
-          id: 'c4',
-          title: 'Yazılımcı İş Dağılımı',
-          type: 'bar_horizontal',
-          xAxisCol: ds.jiraFields?.assigneeCol || 'Atanan Kişi',
-          aggregation: 'count',
-          colorPalette: 'cyber',
-          topN: 12,
-        },
-      ]);
-    } else {
-      setComposerCharts([
-        {
-          id: 'c1',
-          title: 'Birincil Kategori Dağılımı',
-          type: 'bar_vertical',
-          xAxisCol: ds.columns[0]?.key || '',
-          aggregation: 'count',
-          colorPalette: 'technical',
-        },
-        {
-          id: 'c2',
-          title: 'Oransal Dağılım',
-          type: 'donut',
-          xAxisCol: ds.columns[1]?.key || ds.columns[0]?.key || '',
-          aggregation: 'count',
-          colorPalette: 'cyber',
-        },
-      ]);
-    }
-  }, []);
 
   const resetFiltersForDataset = useCallback((ds: Dataset) => {
     const baseCol = ds.jiraFields?.startDateCol || ds.columns.find(c => c.type === 'date')?.key || ds.columns[0]?.key || '';
@@ -249,6 +363,18 @@ const MainApplication: React.FC = () => {
     setQuickFacets({});
   }, []);
 
+  const handleClearAllFilters = useCallback(() => {
+    setDateFilter(prev => ({
+      ...prev,
+      startDate: '',
+      endDate: '',
+      workStartedFilter: 'all',
+      dueFilter: 'all',
+    }));
+    setFilterGroup({ id: 'fg_root', logicalOperator: 'AND', rules: [] });
+    setQuickFacets({});
+  }, []);
+
   const showNotice = (msg: string) => {
     setUpsertNotification(msg);
     setTimeout(() => setUpsertNotification(null), 6000);
@@ -259,27 +385,135 @@ const MainApplication: React.FC = () => {
     const target = datasets.find(d => d.id === id);
     if (!target) return;
     setActiveDatasetId(target.id);
-    initializeComposerCharts(target);
     resetFiltersForDataset(target);
     showNotice(`Aktif veri seti değiştirildi: "${target.name}" (${target.rows.length.toLocaleString()} kayıt)`);
-  }, [datasets, initializeComposerCharts, resetFiltersForDataset]);
+  }, [datasets, resetFiltersForDataset]);
 
-  // Process incoming dataset with Jira Key Controller
+  // Prune filters & custom charts referencing unchecked columns on active dataset
+  const pruneStateForDatasetColumns = useCallback((updatedDs: Dataset) => {
+    const activeKeySet = new Set(updatedDs.columns.map(c => c.key));
+
+    setQuickFacets(prev => {
+      const next: Record<string, string[]> = {};
+      Object.entries(prev).forEach(([k, vals]) => {
+        if (activeKeySet.has(k)) next[k] = vals;
+      });
+      return next;
+    });
+
+    setFilterGroup(prev => ({
+      ...prev,
+      rules: prev.rules.filter(r => activeKeySet.has(r.column)),
+    }));
+
+    setDateFilter(prev => {
+      const nextBaseline = activeKeySet.has(prev.baselineCol)
+        ? prev.baselineCol
+        : updatedDs.jiraFields?.startDateCol ||
+          updatedDs.columns.find(c => c.type === 'date' || c.isDateColumn)?.key ||
+          updatedDs.columns[0]?.key ||
+          '';
+      return {
+        baselineCol: nextBaseline,
+        startDate: activeKeySet.has(prev.baselineCol) ? prev.startDate : '',
+        endDate: activeKeySet.has(prev.baselineCol) ? prev.endDate : '',
+        workStartedFilter: updatedDs.jiraFields?.workStartDateCol ? prev.workStartedFilter : 'all',
+        dueFilter: updatedDs.jiraFields?.dueCol ? prev.dueFilter : 'all',
+      };
+    });
+
+    setPinnedByDataset(prev => {
+      const existing = prev[updatedDs.id];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [updatedDs.id]: existing.filter(
+          c => activeKeySet.has(c.xAxisCol) && (!c.groupByCol || activeKeySet.has(c.groupByCol))
+        ),
+      };
+    });
+
+    setComposerByDataset(prev => {
+      const existing = prev[updatedDs.id];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [updatedDs.id]: {
+          ...existing,
+          charts: existing.charts.filter(
+            c => activeKeySet.has(c.xAxisCol) && (!c.groupByCol || activeKeySet.has(c.groupByCol))
+          ),
+        },
+      };
+    });
+  }, []);
+
+  // Open Column Selection / Field Mapping modal for an existing dataset
+  const handleOpenColumnSelection = useCallback(
+    (target?: Dataset | null, tab: 'columns' | 'mapping' = 'columns') => {
+      const ds = target || dataset;
+      if (!ds) return;
+      setColumnModalDataset(ensureDatasetColumnModel(ds));
+      setColumnModalMode('edit');
+      setColumnModalInitialTab(tab);
+      setColumnModalOpen(true);
+    },
+    [dataset]
+  );
+
+  // Process incoming dataset: let the client choose columns and main filter groups
   const handleProcessIncomingDataset = useCallback(async (incoming: Dataset) => {
-    if (dataset) {
-      // An active dataset already exists: prompt user with Add New / Upsert / Replace
-      setStagedIncomingDataset(incoming);
-      setImportOptionsOpen(true);
-    } else {
-      // First dataset: save & load directly
-      await persistDataset(incoming);
-      setDatasets([incoming]);
-      setActiveDatasetId(incoming.id);
-      initializeComposerCharts(incoming);
-      resetFiltersForDataset(incoming);
-      setActiveView('overview');
+    setColumnModalDataset(ensureDatasetColumnModel(incoming));
+    setColumnModalMode('import');
+    setColumnModalInitialTab('columns');
+    setColumnModalOpen(true);
+  }, []);
+
+  // Confirm column selection & main field mappings (both for import and for loaded dataset)
+  const handleConfirmColumnSelection = async (
+    selectedKeys: string[],
+    customName?: string,
+    fieldMapping?: Dataset['jiraFields']
+  ) => {
+    if (!columnModalDataset) return;
+    const namedDataset: Dataset = customName?.trim()
+      ? { ...columnModalDataset, name: customName.trim() }
+      : columnModalDataset;
+    const configured = applyDatasetColumnSelection(namedDataset, selectedKeys, fieldMapping);
+
+    setColumnModalOpen(false);
+    setColumnModalDataset(null);
+
+    if (columnModalMode === 'import') {
+      if (dataset) {
+        setStagedIncomingDataset(configured);
+        setImportOptionsOpen(true);
+      } else {
+        await persistDataset(configured);
+        setDatasets([configured]);
+        setActiveDatasetId(configured.id);
+        resetFiltersForDataset(configured);
+        setActiveView('overview');
+        showNotice(
+          `"${configured.name}" ${configured.selectedColumnKeys?.length || configured.columns.length} seçili kolon ile yüklendi.`
+        );
+      }
+      return;
     }
-  }, [dataset, initializeComposerCharts, resetFiltersForDataset]);
+
+    // Editing columns / mappings of an already loaded dataset
+    await persistDataset(configured);
+    setDatasets(prev => prev.map(d => (d.id === configured.id ? configured : d)));
+    if (configured.id === activeDatasetId) {
+      pruneStateForDatasetColumns(configured);
+      if (configured.sourceType !== 'jira' && (activeView === 'jira_analytics' || activeView === 'audit_report')) {
+        setActiveView('overview');
+      }
+    }
+    showNotice(
+      `"${configured.name}" güncellendi: ${configured.selectedColumnKeys?.length || configured.columns.length} aktif kolon ve atanan ana alanlar devrede.`
+    );
+  };
 
   // Option 1: Save incoming CSV as brand new dataset & switch to it
   const handleConfirmAddNew = async (customName?: string) => {
@@ -291,7 +525,6 @@ const MainApplication: React.FC = () => {
     await persistDataset(newDs);
     setDatasets(prev => [newDs, ...prev]);
     setActiveDatasetId(newDs.id);
-    initializeComposerCharts(newDs);
     resetFiltersForDataset(newDs);
     setImportOptionsOpen(false);
     setStagedIncomingDataset(null);
@@ -325,7 +558,6 @@ const MainApplication: React.FC = () => {
     await persistDataset(newDs);
     setDatasets(prev => [newDs, ...prev.filter(d => d.id !== dataset?.id)]);
     setActiveDatasetId(newDs.id);
-    initializeComposerCharts(newDs);
     resetFiltersForDataset(newDs);
     setImportOptionsOpen(false);
     setStagedIncomingDataset(null);
@@ -335,25 +567,30 @@ const MainApplication: React.FC = () => {
   // Save current filtered scope as a new dataset inside app
   const handleSaveFilteredAsNewDataset = async (name: string) => {
     if (!dataset) return;
+    const norm = ensureDatasetColumnModel(dataset);
     const clonedRows = filteredRows.map((r, i) => ({ ...r, _id: `row_${i + 1}` }));
-    const colKeys = dataset.columns.map(c => c.key);
-    const recomputedCols = computeColumnMetadata(clonedRows, colKeys);
+    const fullKeys = (norm.allColumns || norm.columns).map(c => c.key);
+    const recomputedAllCols = computeColumnMetadata(clonedRows, fullKeys);
+    const selectedKeys = norm.selectedColumnKeys || norm.columns.filter(c => !c.key.startsWith('_derived_')).map(c => c.key);
 
-    const newDs: Dataset = {
-      ...dataset,
-      id: `ds_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name,
-      sourceFile: `${dataset.sourceFile} (Filtrelenmiş)`,
-      importedAt: new Date().toISOString(),
-      rows: clonedRows,
-      columns: recomputedCols,
-    };
+    const newDs = applyDatasetColumnSelection(
+      {
+        ...norm,
+        id: `ds_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name,
+        sourceFile: `${norm.sourceFile} (Filtrelenmiş)`,
+        importedAt: new Date().toISOString(),
+        rows: clonedRows,
+        allColumns: recomputedAllCols,
+        columns: recomputedAllCols,
+      },
+      selectedKeys
+    );
 
     await persistDataset(newDs);
     setDatasets(prev => [newDs, ...prev]);
     setActiveDatasetId(newDs.id);
     resetFiltersForDataset(newDs);
-    initializeComposerCharts(newDs);
     setDatasetManagerOpen(false);
     showNotice(`"${name}" veri seti kaydedildi ve açıldı (${clonedRows.length.toLocaleString()} kayıt).`);
   };
@@ -376,7 +613,6 @@ const MainApplication: React.FC = () => {
       const next = remaining[0] || null;
       setActiveDatasetId(next ? next.id : null);
       if (next) {
-        initializeComposerCharts(next);
         resetFiltersForDataset(next);
       }
     }
@@ -412,22 +648,21 @@ const MainApplication: React.FC = () => {
     }
   }, [electronAPI, handleProcessIncomingDataset]);
 
-  // Initial Startup: Load saved datasets from disk; auto-load Desktop Jira ONLY if none saved
+  // Initial Startup
   useEffect(() => {
     if (initialized) return;
     (async () => {
       setLoading(true);
       try {
-        const saved = await loadSavedDatasets();
+        const savedRaw = await loadSavedDatasets();
+        const saved = savedRaw.map(ensureDatasetColumnModel);
         if (saved.length > 0) {
           setDatasets(saved);
           const storedActive = localStorage.getItem('reporter_active_dataset_id');
           const initialDs = saved.find(d => d.id === storedActive) || saved[0];
           setActiveDatasetId(initialDs.id);
-          initializeComposerCharts(initialDs);
           resetFiltersForDataset(initialDs);
         } else {
-          // First run ever: try loading Desktop Jira (2).csv
           let fileData = null;
           if (electronAPI?.getDesktopJira) {
             fileData = await electronAPI.getDesktopJira();
@@ -437,7 +672,6 @@ const MainApplication: React.FC = () => {
             await persistDataset(ds);
             setDatasets([ds]);
             setActiveDatasetId(ds.id);
-            initializeComposerCharts(ds);
             resetFiltersForDataset(ds);
           } else {
             const res = await fetch('./sample-data/Jira(2).csv').catch(() => null);
@@ -447,7 +681,6 @@ const MainApplication: React.FC = () => {
               await persistDataset(ds);
               setDatasets([ds]);
               setActiveDatasetId(ds.id);
-              initializeComposerCharts(ds);
               resetFiltersForDataset(ds);
             }
           }
@@ -459,7 +692,7 @@ const MainApplication: React.FC = () => {
         setLoading(false);
       }
     })();
-  }, [initialized, electronAPI, initializeComposerCharts, resetFiltersForDataset]);
+  }, [initialized, electronAPI, resetFiltersForDataset]);
 
   // Handle Import CSV Dialog
   const handleImportClick = async () => {
@@ -479,7 +712,8 @@ const MainApplication: React.FC = () => {
         input.onchange = async (e: any) => {
           const f = e.target.files?.[0];
           if (f) {
-            const text = await f.text();
+            const buf = await f.arrayBuffer();
+            const text = decodeCsvArrayBuffer(buf);
             const ds = parseCsvFile(text, f.name, f.size);
             await handleProcessIncomingDataset(ds);
           }
@@ -505,7 +739,8 @@ const MainApplication: React.FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const text = await file.text();
+        const buf = await file.arrayBuffer();
+        const text = decodeCsvArrayBuffer(buf);
         const ds = parseCsvFile(text, file.name, file.size);
         await handleProcessIncomingDataset(ds);
       } catch (err: any) {
@@ -516,16 +751,21 @@ const MainApplication: React.FC = () => {
     }
   };
 
-  // Quick Facet Handlers
-  const handleToggleFacetValue = (colKey: string, value: string) => {
+  // Quick Facet & Cross-Filter Handlers
+  const handleToggleFacetValue = useCallback((colKey: string, value: string) => {
     setQuickFacets(prev => {
       const current = prev[colKey] || [];
       const updated = current.includes(value)
         ? current.filter(v => v !== value)
         : [...current, value];
+      if (updated.length === 0) {
+        const copy = { ...prev };
+        delete copy[colKey];
+        return copy;
+      }
       return { ...prev, [colKey]: updated };
     });
-  };
+  }, []);
 
   const handleClearFacetColumn = (colKey: string) => {
     setQuickFacets(prev => {
@@ -563,7 +803,23 @@ const MainApplication: React.FC = () => {
   };
 
   const handleAddChartToComposer = (cfg: ChartConfig) => {
-    setComposerCharts(prev => [...prev, cfg]);
+    updateActiveComposer({ charts: [...activeComposer.charts, cfg] });
+  };
+
+  const handlePinToOverview = (cfg: ChartConfig) => {
+    if (!dataset) return;
+    setPinnedByDataset(prev => ({
+      ...prev,
+      [dataset.id]: [...(prev[dataset.id] || []), cfg],
+    }));
+  };
+
+  const handleUnpinChart = (chartId: string) => {
+    if (!dataset) return;
+    setPinnedByDataset(prev => ({
+      ...prev,
+      [dataset.id]: (prev[dataset.id] || []).filter(c => c.id !== chartId),
+    }));
   };
 
   return (
@@ -579,6 +835,8 @@ const MainApplication: React.FC = () => {
         onSelectDataset={handleSelectDataset}
         onRenameDataset={handleRenameDataset}
         onOpenDatasetManager={() => setDatasetManagerOpen(true)}
+        onOpenColumnSelection={() => handleOpenColumnSelection()}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onImportClick={handleImportClick}
         onLoadDesktopJira={handleLoadDesktopJira}
         loading={loading}
@@ -597,6 +855,7 @@ const MainApplication: React.FC = () => {
             workStartedFilter: 'all',
             dueFilter: 'all',
           })}
+          onOpenFieldMapping={() => handleOpenColumnSelection(null, 'mapping')}
         />
       )}
 
@@ -616,9 +875,27 @@ const MainApplication: React.FC = () => {
         />
       )}
 
+      {/* Active Filter Breadcrumbs Bar */}
+      {dataset && (
+        <ActiveFilterBar
+          dateFilter={dateFilter}
+          quickFacets={quickFacets}
+          filterGroup={filterGroup}
+          columnMetaMap={columnMetaMap}
+          onClearDateRange={() => setDateFilter(prev => ({ ...prev, startDate: '', endDate: '' }))}
+          onClearWorkStarted={() => setDateFilter(prev => ({ ...prev, workStartedFilter: 'all' }))}
+          onClearDueFilter={() => setDateFilter(prev => ({ ...prev, dueFilter: 'all' }))}
+          onRemoveFacetValue={handleToggleFacetValue}
+          onRemoveRule={(ruleId) =>
+            setFilterGroup(prev => ({ ...prev, rules: prev.rules.filter(r => r.id !== ruleId) }))
+          }
+          onClearAll={handleClearAllFilters}
+        />
+      )}
+
       {/* Jira Key Controller / Dataset Operation Feedback Notification */}
       {upsertNotification && (
-        <div className="bg-emerald-950/60 border-b border-emerald-500/40 px-4 py-2 flex items-center justify-between text-emerald-300 text-xs font-mono animate-in slide-in-from-top-1">
+        <div className="bg-emerald-950/60 border-b border-emerald-500/40 px-4 py-2 flex items-center justify-between text-emerald-300 text-xs font-mono animate-in slide-in-from-top-1 no-print">
           <div className="flex items-center space-x-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span>{upsertNotification}</span>
@@ -634,7 +911,7 @@ const MainApplication: React.FC = () => {
 
       {/* Global Error Banner */}
       {error && (
-        <div className="bg-rose-950/50 border-b border-rose-500/30 px-4 py-2 flex items-center justify-between text-rose-300 text-xs font-mono">
+        <div className="bg-rose-950/50 border-b border-rose-500/30 px-4 py-2 flex items-center justify-between text-rose-300 text-xs font-mono no-print">
           <div className="flex items-center space-x-2">
             <AlertCircle className="w-4 h-4 text-rose-400" />
             <span>{error}</span>
@@ -667,6 +944,7 @@ const MainApplication: React.FC = () => {
         {dataset && activeView !== 'composer' && (
           <QuickFacets
             columns={dataset.columns}
+            jiraFields={dataset.jiraFields}
             selectedFacets={quickFacets}
             onToggleFacetValue={handleToggleFacetValue}
             onClearFacetColumn={handleClearFacetColumn}
@@ -724,8 +1002,11 @@ const MainApplication: React.FC = () => {
                   dataset={dataset}
                   filteredRows={filteredRows}
                   columnMetaMap={columnMetaMap}
+                  pinnedCharts={activePinnedCharts}
+                  onUnpinChart={handleUnpinChart}
                   onNavigateToView={setActiveView}
                   onSelectRow={setSelectedRow}
+                  onChartElementClick={handleToggleFacetValue}
                 />
               )}
 
@@ -735,7 +1016,9 @@ const MainApplication: React.FC = () => {
                   filteredRows={filteredRows}
                   columnMetaMap={columnMetaMap}
                   onAddChartToComposer={handleAddChartToComposer}
+                  onPinToOverview={handlePinToOverview}
                   onSelectRow={setSelectedRow}
+                  onChartElementClick={handleToggleFacetValue}
                 />
               )}
 
@@ -745,6 +1028,7 @@ const MainApplication: React.FC = () => {
                   filteredRows={filteredRows}
                   columnMetaMap={columnMetaMap}
                   onSelectRow={setSelectedRow}
+                  onChartElementClick={handleToggleFacetValue}
                 />
               )}
 
@@ -754,6 +1038,8 @@ const MainApplication: React.FC = () => {
                   filteredRows={filteredRows}
                   columnMetaMap={columnMetaMap}
                   onSelectRow={setSelectedRow}
+                  onChartElementClick={handleToggleFacetValue}
+                  onOpenColumnSelection={() => handleOpenColumnSelection(null, 'mapping')}
                 />
               )}
 
@@ -777,14 +1063,21 @@ const MainApplication: React.FC = () => {
                   dataset={dataset}
                   filteredRows={filteredRows}
                   columnMetaMap={columnMetaMap}
-                  composerCharts={composerCharts}
-                  onUpdateComposerCharts={setComposerCharts}
+                  composerCharts={activeComposer.charts}
+                  reportTitle={activeComposer.title}
+                  reportNotes={activeComposer.notes}
+                  onChangeReportTitle={(title) => updateActiveComposer({ title })}
+                  onChangeReportNotes={(notes) => updateActiveComposer({ notes })}
+                  onUpdateComposerCharts={(charts) => updateActiveComposer({ charts })}
                   onSelectRow={setSelectedRow}
                 />
               )}
 
               {activeView === 'schema' && (
-                <SchemaView dataset={dataset} />
+                <SchemaView
+                  dataset={dataset}
+                  onOpenColumnSelection={() => handleOpenColumnSelection()}
+                />
               )}
             </>
           )}
@@ -818,6 +1111,19 @@ const MainApplication: React.FC = () => {
         />
       )}
 
+      {/* Column Selection & Main Field Mapping Modal (for Import & Loaded Datasets) */}
+      <ColumnSelectionModal
+        isOpen={columnModalOpen}
+        onClose={() => {
+          setColumnModalOpen(false);
+          setColumnModalDataset(null);
+        }}
+        dataset={columnModalDataset}
+        mode={columnModalMode}
+        initialTab={columnModalInitialTab}
+        onConfirm={handleConfirmColumnSelection}
+      />
+
       {/* Jira Key Controller Upsert / New Dataset Conflict Modal */}
       {dataset && stagedIncomingDataset && (
         <ImportOptionsModal
@@ -831,6 +1137,13 @@ const MainApplication: React.FC = () => {
           onConfirmAddNew={handleConfirmAddNew}
           onConfirmMerge={handleConfirmMerge}
           onConfirmReplace={handleConfirmReplace}
+          onEditColumns={() => {
+            setImportOptionsOpen(false);
+            setColumnModalDataset(stagedIncomingDataset);
+            setColumnModalMode('import');
+            setColumnModalInitialTab('columns');
+            setColumnModalOpen(true);
+          }}
         />
       )}
 
@@ -844,8 +1157,25 @@ const MainApplication: React.FC = () => {
         onSelectDataset={handleSelectDataset}
         onRenameDataset={handleRenameDataset}
         onDeleteDataset={handleDeleteDataset}
+        onEditDatasetColumns={(ds) => handleOpenColumnSelection(ds)}
         onSaveFilteredAsNewDataset={handleSaveFilteredAsNewDataset}
         onImportNewCsv={handleImportClick}
+      />
+
+      {/* Global Ctrl+K Command Palette */}
+      <CommandPaletteModal
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        dataset={dataset}
+        datasets={datasets}
+        onNavigateView={setActiveView}
+        onSelectDataset={handleSelectDataset}
+        onSelectRow={setSelectedRow}
+        onToggleTheme={toggleTheme}
+        onImportCsv={handleImportClick}
+        onOpenExport={() => setExportModalOpen(true)}
+        onOpenColumnSelection={() => handleOpenColumnSelection()}
+        onClearAllFilters={handleClearAllFilters}
       />
     </div>
   );

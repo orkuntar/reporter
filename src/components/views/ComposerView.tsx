@@ -16,6 +16,10 @@ interface ComposerViewProps {
   filteredRows: DataRow[];
   columnMetaMap: Map<string, ColumnMeta>;
   composerCharts: ChartConfig[];
+  reportTitle: string;
+  reportNotes: string;
+  onChangeReportTitle: (title: string) => void;
+  onChangeReportNotes: (notes: string) => void;
   onUpdateComposerCharts: (charts: ChartConfig[]) => void;
   onSelectRow: (row: DataRow) => void;
 }
@@ -25,15 +29,15 @@ export const ComposerView: React.FC<ComposerViewProps> = ({
   filteredRows,
   columnMetaMap,
   composerCharts,
+  reportTitle,
+  reportNotes,
+  onChangeReportTitle,
+  onChangeReportNotes,
   onUpdateComposerCharts,
   onSelectRow,
 }) => {
   const { t } = useLanguage();
   const electronAPI = (window as any).electronAPI;
-  const [reportTitle, setReportTitle] = useState(`${dataset.name} — Yönetici Analiz Raporu`);
-  const [reportNotes, setReportNotes] = useState(
-    `Aktif veri kümesi kayıtlarından derlenmiş kapsamlı analiz raporu. Toplam ${filteredRows.length} filtrelenmiş kayıt içerir.`
-  );
   const [isExporting, setIsExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
 
@@ -93,9 +97,9 @@ export const ComposerView: React.FC<ComposerViewProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#080a0e] select-none">
+    <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#080a0e] select-none print-container">
       {/* Top Composer Control Bar */}
-      <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+      <div className="flex items-center justify-between border-b border-white/[0.08] pb-4 no-print">
         <div>
           <div className="flex items-center space-x-2">
             <span className="text-2xs font-mono uppercase tracking-widest text-cyan-400 font-semibold">
@@ -131,24 +135,24 @@ export const ComposerView: React.FC<ComposerViewProps> = ({
       </div>
 
       {exportStatus && (
-        <div className="bg-cyan-950/40 border border-cyan-500/40 text-cyan-300 text-xs font-mono px-3 py-2 rounded">
+        <div className="bg-cyan-950/40 border border-cyan-500/40 text-cyan-300 text-xs font-mono px-3 py-2 rounded no-print">
           {exportStatus}
         </div>
       )}
 
       {/* Editable Report Header Sheet */}
-      <div className="bg-[#0f1219] border border-white/[0.08] rounded-md p-6 space-y-3">
+      <div className="bg-[#0f1219] border border-white/[0.08] rounded-md p-6 space-y-3 print-break-inside">
         <input
           type="text"
           value={reportTitle}
-          onChange={(e) => setReportTitle(e.target.value)}
+          onChange={(e) => onChangeReportTitle(e.target.value)}
           placeholder="Rapor Başlığı..."
           className="w-full bg-transparent border-b border-white/[0.1] text-lg font-bold text-white pb-1 font-mono focus:outline-none focus:border-cyan-500"
         />
 
         <textarea
           value={reportNotes}
-          onChange={(e) => setReportNotes(e.target.value)}
+          onChange={(e) => onChangeReportNotes(e.target.value)}
           placeholder={t.reportNotes}
           rows={2}
           className="w-full bg-[#141822] border border-white/[0.08] rounded text-xs text-slate-300 p-2 font-mono focus:outline-none focus:border-cyan-500"
@@ -168,11 +172,11 @@ export const ComposerView: React.FC<ComposerViewProps> = ({
         {composerCharts.map((cfg, idx) => (
           <div
             key={cfg.id}
-            className="bg-[#0f1219] border border-white/[0.08] rounded-md p-5 flex flex-col justify-between group"
+            className="bg-[#0f1219] border border-white/[0.08] rounded-md p-5 flex flex-col justify-between group print-break-inside"
           >
             <div className="flex items-center justify-between border-b border-white/[0.06] pb-3 mb-3">
               <div className="flex items-center space-x-2">
-                <span className="text-2xs font-mono text-slate-400 font-bold">
+                <span className="text-2xs font-mono text-slate-400 font-bold no-print">
                   {t.block} {idx + 1}
                 </span>
                 <input
@@ -187,7 +191,7 @@ export const ComposerView: React.FC<ComposerViewProps> = ({
                 />
               </div>
 
-              <div className="flex items-center space-x-1">
+              <div className="flex items-center space-x-1 no-print">
                 <button
                   onClick={() => handleMove(idx, 'up')}
                   disabled={idx === 0}

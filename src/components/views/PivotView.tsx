@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Grid } from 'lucide-react';
 import { ColumnMeta, Dataset, DataRow } from '../../types';
 import { computePivotTable } from '../../core/analyticsEngine';
@@ -21,6 +21,19 @@ export const PivotView: React.FC<PivotViewProps> = ({ dataset, filteredRows }) =
   );
   const [valColKey, setValColKey] = useState<string>('');
   const [aggregation, setAggregation] = useState<'count' | 'sum' | 'avg'>('count');
+
+  useEffect(() => {
+    const activeSet = new Set(dataset.columns.map(c => c.key));
+    if (!activeSet.has(rowColKey)) {
+      setRowColKey(dataset.jiraFields?.priorityCol || dataset.columns[0]?.key || '');
+    }
+    if (!activeSet.has(colColKey)) {
+      setColColKey(dataset.jiraFields?.statusCol || dataset.columns[1]?.key || dataset.columns[0]?.key || '');
+    }
+    if (valColKey && !activeSet.has(valColKey)) {
+      setValColKey('');
+    }
+  }, [dataset.columns, dataset.jiraFields, rowColKey, colColKey, valColKey]);
 
   const pivotData = computePivotTable(
     filteredRows,

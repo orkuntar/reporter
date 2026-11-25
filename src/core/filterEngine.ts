@@ -164,11 +164,13 @@ export function filterDataset(
     }
   }
 
-  // 2. Global Search
+  // 2. Global Search (strictly within selected/active columns when columnMetaMap is provided)
   if (globalSearch && globalSearch.trim()) {
     const q = globalSearch.toLowerCase().trim();
+    const activeKeys = columnMetaMap && columnMetaMap.size > 0 ? Array.from(columnMetaMap.keys()) : null;
     result = result.filter(row => {
-      return Object.values(row).some(val => {
+      const valuesToSearch = activeKeys ? activeKeys.map(k => row[k]) : Object.values(row);
+      return valuesToSearch.some(val => {
         if (val === null || val === undefined) return false;
         if (Array.isArray(val)) {
           return val.some(v => String(v).toLowerCase().includes(q));

@@ -23,7 +23,6 @@ function formatDateBucket(date: Date, granularity: DateGranularity): { label: st
     return { label: `${y}-${m}`, sortTs: new Date(y, date.getMonth(), 1).getTime() };
   }
   if (granularity === 'week') {
-    // Monday-based week start
     const dayOfWeek = date.getDay();
     const diffToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
     const monday = new Date(y, date.getMonth(), date.getDate() + diffToMon);
@@ -32,8 +31,14 @@ function formatDateBucket(date: Date, granularity: DateGranularity): { label: st
     const wd = String(monday.getDate()).padStart(2, '0');
     return { label: `${wy}-${wm}-${wd} (Hft)`, sortTs: monday.getTime() };
   }
-  // Default: 'day'
   return { label: `${y}-${m}-${d}`, sortTs: new Date(y, date.getMonth(), date.getDate()).getTime() };
+}
+
+function advanceDateBucket(date: Date, granularity: DateGranularity): Date {
+  if (granularity === 'year') return new Date(date.getFullYear() + 1, 0, 1);
+  if (granularity === 'month') return new Date(date.getFullYear(), date.getMonth() + 1, 1);
+  if (granularity === 'week') return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 7);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
 }
 
 export function aggregateData(
@@ -82,7 +87,6 @@ export function aggregateData(
   const allSubKeys = new Set<string>();
 
   rows.forEach(row => {
-    // Sub-group filtering first if includeSubValues is specified
     let subKey: string | null = null;
     if (groupByCol) {
       const rawSub = row[groupByCol];
@@ -91,7 +95,7 @@ export function aggregateData(
         : '(Boş)';
 
       if (includeSubValues && includeSubValues.length > 0 && !includeSubValues.includes(subKey)) {
-        return; // skip rows not matching selected sub-series
+        return;
       }
     }
 
@@ -100,7 +104,7 @@ export function aggregateData(
 
     if (useDateBucketing) {
       const parsedDate = parseCustomDate(rawX);
-      if (!parsedDate) return; // Skip unparseable/empty dates in time-series mode
+      if (!parsedDate) return;
       xEntries = [formatDateBucket(parsedDate, effectiveGranularity)];
     } else if (Array.isArray(rawX)) {
       xEntries = rawX.length > 0
@@ -113,7 +117,6 @@ export function aggregateData(
       xEntries = [{ label: lbl, sortTs: 0 }];
     }
 
-    // Y numeric value
     let numY = 1;
     if (yAxisCol) {
       const parsedY = parseNumber(row[yAxisCol]);
@@ -134,7 +137,8 @@ export function aggregateData(
 
       if (subKey) {
         if (!g.sub[subKey]) {
-          g.sub[subKey] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
+          g.sub[subKey] = { sum: 0, count: 0, min: Infinity, max: Infinity };
+          g.sub[subKey].max = -Infinity;
         }
         const s = g.sub[subKey];
         s.count += 1;
@@ -147,7 +151,6 @@ export function aggregateData(
 
   const subKeysList = Array.from(allSubKeys).sort();
 
-  // Calculate final aggregated values
   let items: AggregationResultItem[] = Object.entries(groups).map(([label, stats]) => {
     let finalVal = stats.count;
     if (aggregation === 'sum') finalVal = stats.sum;
@@ -187,7 +190,44 @@ export function aggregateData(
   } else if (sortBy === 'value_asc') {
     items.sort((a, b) => a.value - b.value);
   } else if (sortBy === 'label_asc') {
-    items.sort((a, b) => a.label.localeCompare(b.label));
+    items.sort((a, b) => a.label.localeCompare(b.label, 'tr-TR'));
+  }
+
+  // Time continuity: fill missing date buckets with 0 for continuous trend curves
+  if (useDateBucketing && items.length >= 2) {
+    const existingByLabel = new Map(items.map(it => [it.label, it]));
+    const filled: AggregationResultItem[] = [];
+    const minTs = items[0]._sortTs || 0;
+    const maxTs = items[items.length - 1]._sortTs || 0;
+
+    if (minTs > 0 && maxTs > minTs) {
+      let cursor = new Date(minTs);
+      let safety = 0;
+      const subZeroes: Record<string, number> = {};
+      subKeysList.forEach(sk => (subZeroes[sk] = 0));
+
+      while (cursor.getTime() <= maxTs && safety < 366) {
+        const bucket = formatDateBucket(cursor, effectiveGranularity);
+        const found = existingByLabel.get(bucket.label);
+        if (found) {
+          filled.push(found);
+        } else {
+          filled.push({
+            label: bucket.label,
+            value: 0,
+            count: 0,
+            _sortTs: bucket.sortTs,
+            ...subZeroes,
+          });
+        }
+        cursor = advanceDateBucket(cursor, effectiveGranularity);
+        safety++;
+      }
+
+      if (filled.length > 0 && safety < 366) {
+        items = filled;
+      }
+    }
   }
 
   // Top N & "Other" aggregation only for non-time-series categorical charts
@@ -262,8 +302,8 @@ export function computePivotTable(
     matrix[rLabel][cLabel].count += 1;
   });
 
-  const rowLabels = Array.from(rowLabelsSet).sort();
-  const colLabels = Array.from(colLabelsSet).sort();
+  const rowLabels = Array.from(rowLabelsSet).sort((a, b) => a.localeCompare(b, 'tr-TR'));
+  const colLabels = Array.from(colLabelsSet).sort((a, b) => a.localeCompare(b, 'tr-TR'));
 
   const finalMatrix: Record<string, Record<string, number>> = {};
   const rowTotals: Record<string, number> = {};

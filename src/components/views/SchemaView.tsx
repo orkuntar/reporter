@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { Search } from 'lucide-react';
-import { ColumnMeta, Dataset } from '../../types';
+import { Search, Columns } from 'lucide-react';
+import { Dataset } from '../../types';
 import { useLanguage } from '../../i18n/LanguageContext';
+import { getSelectableColumns } from '../../core/parser';
 
 interface SchemaViewProps {
   dataset: Dataset;
+  onOpenColumnSelection?: () => void;
 }
 
-export const SchemaView: React.FC<SchemaViewProps> = ({ dataset }) => {
+export const SchemaView: React.FC<SchemaViewProps> = ({ dataset, onOpenColumnSelection }) => {
   const { t } = useLanguage();
   const [search, setSearch] = useState('');
+  const totalSelectableCount = getSelectableColumns(dataset).length;
+  const activeSelectedCount = dataset.selectedColumnKeys?.length ?? dataset.columns.filter(c => !c.key.startsWith('_derived_')).length;
 
   const filteredColumns = dataset.columns.filter(c =>
     c.label.toLowerCase().includes(search.toLowerCase()) ||
@@ -27,7 +31,7 @@ export const SchemaView: React.FC<SchemaViewProps> = ({ dataset }) => {
               {t.schemaTitle}
             </span>
             <span className="px-1.5 py-0.2 bg-white/[0.05] border border-white/[0.1] text-2xs font-mono text-slate-300 rounded">
-              {dataset.columns.length} {t.columns.toLowerCase()}
+              {activeSelectedCount} / {totalSelectableCount} {t.columns.toLowerCase()}
             </span>
           </div>
           <h1 className="text-xl font-bold tracking-tight text-white mt-1">
@@ -35,15 +39,26 @@ export const SchemaView: React.FC<SchemaViewProps> = ({ dataset }) => {
           </h1>
         </div>
 
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-          <input
-            type="text"
-            placeholder={t.searchColumns}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="bg-[#141822] border border-white/[0.08] rounded text-xs text-slate-200 pl-8 pr-3 py-1.5 font-mono focus:outline-none focus:border-cyan-500 w-64"
-          />
+        <div className="flex items-center space-x-3">
+          {onOpenColumnSelection && (
+            <button
+              onClick={onOpenColumnSelection}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-cyan-950/35 hover:bg-cyan-900/45 border border-cyan-500/40 text-xs font-mono text-cyan-300 transition-colors"
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>Kullanılacak Kolonları Seç</span>
+            </button>
+          )}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+            <input
+              type="text"
+              placeholder={t.searchColumns}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="bg-[#141822] border border-white/[0.08] rounded text-xs text-slate-200 pl-8 pr-3 py-1.5 font-mono focus:outline-none focus:border-cyan-500 w-64"
+            />
+          </div>
         </div>
       </div>
 

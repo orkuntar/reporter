@@ -57,7 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside
       className={`${
         isCollapsed ? 'w-14' : 'w-56'
-      } bg-[#090b0f] border-r border-white/[0.06] flex flex-col justify-between select-none transition-all duration-200 flex-shrink-0`}
+      } bg-[#090b0f] border-r border-white/[0.06] flex flex-col justify-between select-none transition-all duration-200 flex-shrink-0 no-print`}
     >
       {/* Navigation Section */}
       <div className="py-3 px-2 space-y-1">

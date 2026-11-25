@@ -15,6 +15,8 @@ interface AuditReportViewProps {
   filteredRows: DataRow[];
   columnMetaMap: Map<string, ColumnMeta>;
   onSelectRow: (row: DataRow) => void;
+  onChartElementClick?: (columnKey: string, value: string) => void;
+  onOpenColumnSelection?: () => void;
 }
 
 type AuditFilterTab =
@@ -30,21 +32,32 @@ export const AuditReportView: React.FC<AuditReportViewProps> = ({
   filteredRows,
   columnMetaMap,
   onSelectRow,
+  onChartElementClick,
+  onOpenColumnSelection,
 }) => {
   const [activeTab, setActiveTab] = useState<AuditFilterTab>('all_anomalies');
 
-  const statusCol = dataset.jiraFields?.statusCol || 'Durum';
-  const typeCol = dataset.jiraFields?.typeCol || 'Konu Türü';
-  const startDateCol = dataset.jiraFields?.startDateCol || 'Özel alan (Başlangıç tarihi)';
-  const dueCol = dataset.jiraFields?.dueCol || 'Bitiş tarihi';
+  const statusCol = dataset.jiraFields?.statusCol || '';
+  const typeCol = dataset.jiraFields?.typeCol || '';
+  const startDateCol = dataset.jiraFields?.startDateCol || '';
+  const dueCol = dataset.jiraFields?.dueCol || '';
+  const hasParentKeyCol = columnMetaMap.has('Üst anahtar');
+
+  const missingRequiredCols: string[] = [];
+  if (!statusCol || !columnMetaMap.has(statusCol)) missingRequiredCols.push('Durum');
+  if (!startDateCol || !columnMetaMap.has(startDateCol)) missingRequiredCols.push('Başlangıç tarihi');
+  if (!dueCol || !columnMetaMap.has(dueCol)) missingRequiredCols.push('Bitiş tarihi');
 
   // Alt görevleri ve İptal edilen kayıtları inceleme kapsamından hariç tut
   const { eligibleRows, excludedSubtaskCount, excludedCancelledCount } = useMemo(() => {
+    if (missingRequiredCols.length > 0) {
+      return { eligibleRows: [], excludedSubtaskCount: 0, excludedCancelledCount: 0 };
+    }
     let subtasks = 0;
     let cancelled = 0;
     const rows = filteredRows.filter(row => {
-      const typeVal = String(row[typeCol] || '').trim().toLowerCase();
-      const parentKeyVal = String(row['Üst anahtar'] || '').trim();
+      const typeVal = typeCol && columnMetaMap.has(typeCol) ? String(row[typeCol] || '').trim().toLowerCase() : '';
+      const parentKeyVal = hasParentKeyCol ? String(row['Üst anahtar'] || '').trim() : '';
       const isSubtask =
         typeVal.includes('alt görev') ||
         typeVal.includes('sub-task') ||
@@ -57,7 +70,7 @@ export const AuditReportView: React.FC<AuditReportViewProps> = ({
       }
 
       const rawStatus = String(row[statusCol] || '').trim().toLowerCase();
-      const bucket = String(row['_derived_status_bucket'] || '');
+      const bucket = columnMetaMap.has('_derived_status_bucket') ? String(row['_derived_status_bucket'] || '') : '';
       const isCancelled =
         bucket === 'İptal Edildi' ||
         rawStatus.includes('iptal') ||
@@ -77,7 +90,7 @@ export const AuditReportView: React.FC<AuditReportViewProps> = ({
       excludedSubtaskCount: subtasks,
       excludedCancelledCount: cancelled,
     };
-  }, [filteredRows, typeCol, statusCol]);
+  }, [filteredRows, typeCol, statusCol, hasParentKeyCol, columnMetaMap, missingRequiredCols.length]);
 
   const auditStats = useMemo(() => {
     const activeMissingStart: DataRow[] = [];
@@ -161,7 +174,7 @@ export const AuditReportView: React.FC<AuditReportViewProps> = ({
     }
   }, [activeTab, auditStats]);
 
-  const auditCharts: ChartConfig[] = [
+  const candidateAuditCharts: ChartConfig[] = [
     {
       id: 'audit_status_dist',
       title: 'Eksik Tarihli Kayıtların Durum Dağılımı',
@@ -174,7 +187,7 @@ export const AuditReportView: React.FC<AuditReportViewProps> = ({
       id: 'audit_dept_dist',
       title: 'Departman Bazlı Eksik Tarih Yoğunluğu',
       type: 'bar_horizontal',
-      xAxisCol: dataset.jiraFields?.departmentCol || 'Özel alan (Talep Eden Departman)',
+      xAxisCol: dataset.jiraFields?.departmentCol || '',
       groupByCol: statusCol,
       stackedSeries: true,
       aggregation: 'count',
@@ -183,6 +196,37 @@ export const AuditReportView: React.FC<AuditReportViewProps> = ({
       topN: 10,
     },
   ];
+
+  const auditCharts = candidateAuditCharts.filter(
+    cfg => cfg.xAxisCol && columnMetaMap.has(cfg.xAxisCol) && (!cfg.groupByCol || columnMetaMap.has(cfg.groupByCol))
+  );
+
+  if (missingRequiredCols.length > 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4 font-mono">
+        <div className="w-14 h-14 rounded-md bg-amber-950/30 border border-amber-500/35 flex items-center justify-center text-amber-400">
+          <CalendarOff className="w-7 h-7" />
+        </div>
+        <div className="space-y-1.5 max-w-md">
+          <h2 className="text-sm font-bold text-white">
+            Tarih Eksiklik Analizi İçin Gerekli Ana Alanlar Tanımlı Değil
+          </h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Bu raporun çalışabilmesi için şu ana filtre alanlarının atanmış ve seçili olması gerekir:{' '}
+            <span className="text-amber-300 font-semibold">{missingRequiredCols.join(', ')}</span>.
+          </p>
+        </div>
+        {onOpenColumnSelection && (
+          <button
+            onClick={onOpenColumnSelection}
+            className="px-4 py-2 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-semibold text-cyan-300 transition-colors"
+          >
+            Ana Alan Eşleştirmesini Aç
+          </button>
+        )}
+      </div>
+    );
+  }
 
   const tabs: { id: AuditFilterTab; label: string; count: number; accent: string }[] = [
     {
@@ -385,6 +429,7 @@ export const AuditReportView: React.FC<AuditReportViewProps> = ({
               rows={displayedRows}
               columnMetaMap={columnMetaMap}
               height={260}
+              onElementClick={onChartElementClick}
             />
           </div>
         ))}

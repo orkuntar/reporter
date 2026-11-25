@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, X } from 'lucide-react';
+import { Calendar, X, SlidersHorizontal } from 'lucide-react';
 import { Dataset, DateFilterState } from '../../types';
 import { useLanguage } from '../../i18n/LanguageContext';
 import { SearchableSelect } from '../common/SearchableSelect';
@@ -9,6 +9,7 @@ interface DateFilterBarProps {
   dateFilter: DateFilterState;
   onChangeDateFilter: (next: DateFilterState) => void;
   onClearDateFilter: () => void;
+  onOpenFieldMapping?: () => void;
 }
 
 export const DateFilterBar: React.FC<DateFilterBarProps> = ({
@@ -16,11 +17,27 @@ export const DateFilterBar: React.FC<DateFilterBarProps> = ({
   dateFilter,
   onChangeDateFilter,
   onClearDateFilter,
+  onOpenFieldMapping,
 }) => {
   const { t } = useLanguage();
 
-  // Find candidate date columns
-  const dateCols = dataset.columns.filter(c => c.type === 'date' || c.isDateColumn || c.key.toLowerCase().includes('tarih'));
+  // Include inferred date columns PLUS any user-assigned main date filter fields
+  const mappedDateKeys = new Set(
+    [
+      dataset.jiraFields?.startDateCol,
+      dataset.jiraFields?.workStartDateCol,
+      dataset.jiraFields?.dueCol,
+      dataset.jiraFields?.createdCol,
+      dataset.jiraFields?.resolvedCol,
+    ].filter(Boolean) as string[]
+  );
+  const dateCols = dataset.columns.filter(
+    c =>
+      mappedDateKeys.has(c.key) ||
+      c.type === 'date' ||
+      c.isDateColumn ||
+      c.key.toLowerCase().includes('tarih')
+  );
 
   const isFilterActive = Boolean(
     dateFilter.startDate ||
@@ -63,7 +80,7 @@ export const DateFilterBar: React.FC<DateFilterBarProps> = ({
   };
 
   return (
-    <div className="bg-[#090c12] border-b border-white/[0.06] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono select-none">
+    <div className="bg-[#090c12] border-b border-white/[0.06] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono select-none no-print">
       {/* Left side: Baseline selector and date range */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center space-x-2 text-cyan-400 font-semibold tracking-wider uppercase text-2xs">
@@ -142,49 +159,65 @@ export const DateFilterBar: React.FC<DateFilterBarProps> = ({
 
       {/* Right side: Yapıma Başlandı & Bitiş Tarihi quick filters & Clear */}
       <div className="flex items-center space-x-2">
-        {/* Yapıma Başlandı Filter (Searchable) */}
-        <div className="flex items-center space-x-1 text-2xs">
-          <span className="text-slate-400">Yapıma Başlandı:</span>
-          <SearchableSelect
-            value={dateFilter.workStartedFilter}
-            onChange={(val) => onChangeDateFilter({ ...dateFilter, workStartedFilter: val as any })}
-            options={[
-              { value: 'all', label: 'Tümü' },
-              { value: 'filled', label: 'Başlanmış' },
-              { value: 'empty', label: 'Başlanmamış' },
-            ]}
-            searchPlaceholder="Ara..."
-            className="w-28"
-            dropdownWidthClass="min-w-[150px]"
-            triggerClassName={`w-full border rounded px-1.5 py-0.5 text-2xs font-mono ${
-              dateFilter.workStartedFilter !== 'all'
-                ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 font-semibold'
-                : 'bg-[#181d2a] border-white/[0.1] text-slate-300'
-            }`}
-          />
-        </div>
+        {/* Yapıma Başlandı Filter (only if column is selected) */}
+        {dataset.jiraFields?.workStartDateCol && (
+          <div className="flex items-center space-x-1 text-2xs">
+            <span className="text-slate-400">Yapıma Başlandı:</span>
+            <SearchableSelect
+              value={dateFilter.workStartedFilter}
+              onChange={(val) => onChangeDateFilter({ ...dateFilter, workStartedFilter: val as any })}
+              options={[
+                { value: 'all', label: 'Tümü' },
+                { value: 'filled', label: 'Başlanmış' },
+                { value: 'empty', label: 'Başlanmamış' },
+              ]}
+              searchPlaceholder="Ara..."
+              className="w-28"
+              dropdownWidthClass="min-w-[150px]"
+              triggerClassName={`w-full border rounded px-1.5 py-0.5 text-2xs font-mono ${
+                dateFilter.workStartedFilter !== 'all'
+                  ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 font-semibold'
+                  : 'bg-[#181d2a] border-white/[0.1] text-slate-300'
+              }`}
+            />
+          </div>
+        )}
 
-        {/* Bitiş Tarihi Filter (Searchable) */}
-        <div className="flex items-center space-x-1 text-2xs">
-          <span className="text-slate-400">Bitiş Tarihi:</span>
-          <SearchableSelect
-            value={dateFilter.dueFilter}
-            onChange={(val) => onChangeDateFilter({ ...dateFilter, dueFilter: val as any })}
-            options={[
-              { value: 'all', label: 'Tümü' },
-              { value: 'filled', label: 'Tarih Girilmiş' },
-              { value: 'empty', label: 'Tarih Boş' },
-            ]}
-            searchPlaceholder="Ara..."
-            className="w-32"
-            dropdownWidthClass="min-w-[160px]"
-            triggerClassName={`w-full border rounded px-1.5 py-0.5 text-2xs font-mono ${
-              dateFilter.dueFilter !== 'all'
-                ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 font-semibold'
-                : 'bg-[#181d2a] border-white/[0.1] text-slate-300'
-            }`}
-          />
-        </div>
+        {/* Bitiş Tarihi Filter (only if column is selected) */}
+        {dataset.jiraFields?.dueCol && (
+          <div className="flex items-center space-x-1 text-2xs">
+            <span className="text-slate-400">Bitiş Tarihi:</span>
+            <SearchableSelect
+              value={dateFilter.dueFilter}
+              onChange={(val) => onChangeDateFilter({ ...dateFilter, dueFilter: val as any })}
+              options={[
+                { value: 'all', label: 'Tümü' },
+                { value: 'filled', label: 'Tarih Girilmiş' },
+                { value: 'empty', label: 'Tarih Boş' },
+              ]}
+              searchPlaceholder="Ara..."
+              className="w-32"
+              dropdownWidthClass="min-w-[160px]"
+              triggerClassName={`w-full border rounded px-1.5 py-0.5 text-2xs font-mono ${
+                dateFilter.dueFilter !== 'all'
+                  ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 font-semibold'
+                  : 'bg-[#181d2a] border-white/[0.1] text-slate-300'
+              }`}
+            />
+          </div>
+        )}
+
+        {onOpenFieldMapping && (
+          <button
+            type="button"
+            onClick={onOpenFieldMapping}
+            className="flex items-center space-x-1 px-2 py-0.5 text-2xs text-cyan-300 hover:text-white bg-cyan-950/30 hover:bg-cyan-900/40 border border-cyan-500/30 rounded transition-colors"
+            title="Başlangıç, Bitiş, Yapıma Başlama ve Durum gibi ana filtre alanlarını eşleştirin veya boş bırakın"
+          >
+            <SlidersHorizontal className="w-3 h-3" />
+            <span>Ana Alanlar</span>
+          </button>
+        )}
 
         {/* Reset button */}
         {isFilterActive && (

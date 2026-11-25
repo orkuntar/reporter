@@ -172,19 +172,19 @@ export function computeColumnMetadata(rows: DataRow[], allColumnKeys: string[]):
       max: numericCount > 0 ? maxNum : undefined,
       sum: numericCount > 0 ? Math.round(sumNum * 100) / 100 : undefined,
       avg: numericCount > 0 ? Math.round((sumNum / numericCount) * 100) / 100 : undefined,
-      minDate: minDateVal ? minDateVal.toISOString().split('T')[0] : undefined,
-      maxDate: maxDateVal ? maxDateVal.toISOString().split('T')[0] : undefined,
+      minDate: minDateVal ? (minDateVal as Date).toISOString().split('T')[0] : undefined,
+      maxDate: maxDateVal ? (maxDateVal as Date).toISOString().split('T')[0] : undefined,
       isDateColumn: isDateCol,
     };
   });
 }
 
 function computeDerivedJiraFields(rows: DataRow[], jiraFields: Dataset['jiraFields']) {
-  if (!jiraFields) return;
+  const fields = jiraFields || {};
   rows.forEach(r => {
     // Cycle time / Lead time in days
-    const startRef = jiraFields.startDateCol ? r[jiraFields.startDateCol] : (jiraFields.createdCol ? r[jiraFields.createdCol] : null);
-    const endRef = jiraFields.dueCol ? r[jiraFields.dueCol] : (jiraFields.resolvedCol ? r[jiraFields.resolvedCol] : null);
+    const startRef = fields.startDateCol ? r[fields.startDateCol] : (fields.createdCol ? r[fields.createdCol] : null);
+    const endRef = fields.dueCol ? r[fields.dueCol] : (fields.resolvedCol ? r[fields.resolvedCol] : null);
 
     if (startRef && endRef) {
       const sDate = parseCustomDate(startRef);
@@ -195,11 +195,13 @@ function computeDerivedJiraFields(rows: DataRow[], jiraFields: Dataset['jiraFiel
       } else {
         r['_derived_lead_time_days'] = null;
       }
+    } else {
+      delete r['_derived_lead_time_days'];
     }
 
     // Normalized status category
-    if (jiraFields.statusCol) {
-      const st = String(r[jiraFields.statusCol] || '').toLowerCase();
+    if (fields.statusCol) {
+      const st = String(r[fields.statusCol] || '').toLowerCase();
       if (st.includes('tamam') || st.includes('bitti') || st.includes('done') || st.includes('closed') || st.includes('çözüldü')) {
         r['_derived_status_bucket'] = 'Tamamlandı';
       } else if (st.includes('devam') || st.includes('in progress') || st.includes('yapılıyor') || st.includes('test') || st.includes('review')) {
@@ -209,11 +211,13 @@ function computeDerivedJiraFields(rows: DataRow[], jiraFields: Dataset['jiraFiel
       } else {
         r['_derived_status_bucket'] = 'Yapılacak';
       }
+    } else {
+      delete r['_derived_status_bucket'];
     }
 
     // Priority ranking score
-    if (jiraFields.priorityCol) {
-      const pr = String(r[jiraFields.priorityCol] || '').toLowerCase();
+    if (fields.priorityCol) {
+      const pr = String(r[fields.priorityCol] || '').toLowerCase();
       if (pr.includes('highest') || pr.includes('en yüksek') || pr.includes('kritik') || pr.includes('critical')) {
         r['_derived_priority_score'] = 5;
       } else if (pr.includes('high') || pr.includes('yüksek')) {
@@ -225,14 +229,95 @@ function computeDerivedJiraFields(rows: DataRow[], jiraFields: Dataset['jiraFiel
       } else {
         r['_derived_priority_score'] = 1;
       }
+    } else {
+      delete r['_derived_priority_score'];
     }
   });
+}
+
+/**
+ * Automatically detects semantic Jira/workflow field roles from column keys.
+ * All detected fields remain optional and can be reassigned or cleared by the client.
+ */
+export function detectJiraFields(columnKeys: string[]): NonNullable<Dataset['jiraFields']> {
+  const keySet = new Set(columnKeys);
+  const jiraFields: NonNullable<Dataset['jiraFields']> = {};
+
+  const resolveMergedOrRaw = (k: string): string => {
+    const base = k.split('__')[0];
+    const merged = `_merged_${base}`;
+    return keySet.has(merged) ? merged : k;
+  };
+
+  columnKeys.forEach(k => {
+    if (k.startsWith('_derived_') || k.startsWith('_merged_')) return;
+    const lk = k.toLowerCase();
+    if ((lk === 'özet' || lk === 'summary') && !jiraFields.summaryCol) jiraFields.summaryCol = k;
+    if ((lk === 'konu anahtarı' || lk === 'issue key' || lk === 'key') && !jiraFields.keyCol) jiraFields.keyCol = k;
+    if ((lk === 'konu türü' || lk === 'issue type' || lk === 'type') && !jiraFields.typeCol) jiraFields.typeCol = k;
+    if ((lk === 'durum' || lk === 'status') && !jiraFields.statusCol) jiraFields.statusCol = k;
+    if ((lk === 'öncelik' || lk === 'priority') && !jiraFields.priorityCol) jiraFields.priorityCol = k;
+    if ((lk === 'atanan kişi' || lk === 'assignee') && !jiraFields.assigneeCol) jiraFields.assigneeCol = k;
+    if ((lk === 'oluşturulan' || lk === 'created') && !jiraFields.createdCol) jiraFields.createdCol = k;
+    if ((lk === 'çözülme tarihi' || lk === 'resolved') && !jiraFields.resolvedCol) jiraFields.resolvedCol = k;
+    if ((lk === 'bitiş tarihi' || lk === 'due date') && !jiraFields.dueCol) jiraFields.dueCol = k;
+    if ((lk.startsWith('etiketler') || lk.startsWith('labels')) && !jiraFields.labelsCol) {
+      jiraFields.labelsCol = resolveMergedOrRaw(k);
+    }
+    if ((lk.includes('talep eden departman') || lk.includes('department')) && !jiraFields.departmentCol) {
+      jiraFields.departmentCol = k;
+    }
+    if ((lk.includes('talep sahibi') || lk.includes('requester')) && !jiraFields.requesterCol) {
+      jiraFields.requesterCol = k;
+    }
+    if ((lk.includes('ortam') || lk.includes('environment')) && !jiraFields.environmentCol) {
+      jiraFields.environmentCol = resolveMergedOrRaw(k);
+    }
+    if ((lk.includes('başlangıç tarihi') || lk.includes('start date')) && !jiraFields.startDateCol) {
+      jiraFields.startDateCol = k;
+    }
+    if ((lk.includes('yapım başlama tarihi') || lk.includes('work start')) && !jiraFields.workStartDateCol) {
+      jiraFields.workStartDateCol = k;
+    }
+    if ((lk.includes('ilgili modül') || lk.includes('module')) && !jiraFields.moduleCol) {
+      jiraFields.moduleCol = resolveMergedOrRaw(k);
+    }
+  });
+
+  return jiraFields;
+}
+
+export function decodeCsvArrayBuffer(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return new TextDecoder('utf-8').decode(bytes.subarray(3));
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    try {
+      return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+    } catch {
+      // fall through
+    }
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    try {
+      return new TextDecoder('windows-1254').decode(bytes);
+    } catch {
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+  }
 }
 
 export function parseCsvFile(content: string, fileName: string, fileSize: number): Dataset {
   const parsed = Papa.parse(content, {
     skipEmptyLines: 'greedy',
     dynamicTyping: false,
+    delimitersToGuess: [',', ';', '\t', '|'],
   });
 
   const rawRows = parsed.data as string[][];
@@ -266,27 +351,9 @@ export function parseCsvFile(content: string, fileName: string, fileSize: number
     }
   });
 
-  // Detect Jira columns with priority matching
-  const jiraFields: Dataset['jiraFields'] = {};
-  columnKeys.forEach(k => {
-    const lk = k.toLowerCase();
-    if (lk === 'özet' || lk === 'summary') jiraFields.summaryCol = k;
-    if (lk === 'konu anahtarı' || lk === 'issue key' || lk === 'key') jiraFields.keyCol = k;
-    if (lk === 'konu türü' || lk === 'issue type' || lk === 'type') jiraFields.typeCol = k;
-    if (lk === 'durum' || lk === 'status') jiraFields.statusCol = k;
-    if (lk === 'öncelik' || lk === 'priority') jiraFields.priorityCol = k;
-    if (lk === 'atanan kişi' || lk === 'assignee') jiraFields.assigneeCol = k;
-    if (lk === 'oluşturulan' || lk === 'created') jiraFields.createdCol = k;
-    if (lk === 'çözülme tarihi' || lk === 'resolved') jiraFields.resolvedCol = k;
-    if (lk === 'bitiş tarihi' || lk === 'due date') jiraFields.dueCol = k;
-    if (lk.startsWith('etiketler') || lk.startsWith('labels')) jiraFields.labelsCol = `_merged_${k.split('__')[0]}`;
-    if (lk.includes('talep eden departman') || lk.includes('department')) jiraFields.departmentCol = k;
-    if (lk.includes('talep sahibi') || lk.includes('requester')) jiraFields.requesterCol = k;
-    if (lk.includes('ortam') || lk.includes('environment')) jiraFields.environmentCol = k;
-    if (lk.includes('başlangıç tarihi') || lk.includes('start date')) jiraFields.startDateCol = k;
-    if (lk.includes('yapım başlama tarihi') || lk.includes('work start')) jiraFields.workStartDateCol = k;
-    if (lk.includes('ilgili modül') || lk.includes('module')) jiraFields.moduleCol = `_merged_${k.split('__')[0]}`;
-  });
+  const mergedKeys = Object.keys(multiColumnGroups).map(base => `_merged_${base}`);
+  // Automatically detect Jira / workflow field mappings (user can override or leave blank)
+  const jiraFields = detectJiraFields([...columnKeys, ...mergedKeys]);
 
   const isJira = Boolean(jiraFields.keyCol || jiraFields.summaryCol || jiraFields.statusCol);
   const keyCol = jiraFields.keyCol || 'Konu anahtarı';
@@ -337,25 +404,20 @@ export function parseCsvFile(content: string, fileName: string, fileSize: number
     }
   });
 
-  // Compute derived fields for Jira datasets
-  if (isJira) {
-    computeDerivedJiraFields(rows, jiraFields);
-  }
+  // Compute derived fields when applicable
+  computeDerivedJiraFields(rows, jiraFields);
 
   // Determine Column Metadata and data types
-  const allColumnKeys = [...columnKeys];
-  if (isJira) {
-    if (rows.some(r => r['_derived_lead_time_days'] !== undefined)) allColumnKeys.push('_derived_lead_time_days');
-    if (jiraFields.statusCol) allColumnKeys.push('_derived_status_bucket');
-    if (jiraFields.priorityCol) allColumnKeys.push('_derived_priority_score');
-  }
-  Object.keys(multiColumnGroups).forEach(base => {
-    allColumnKeys.push(`_merged_${base}`);
-  });
+  const allColumnKeys = [...columnKeys, ...mergedKeys];
+  if (rows.some(r => r['_derived_lead_time_days'] !== undefined)) allColumnKeys.push('_derived_lead_time_days');
+  if (jiraFields.statusCol) allColumnKeys.push('_derived_status_bucket');
+  if (jiraFields.priorityCol) allColumnKeys.push('_derived_priority_score');
 
-  const columns = computeColumnMetadata(rows, allColumnKeys);
+  const allColumns = computeColumnMetadata(rows, allColumnKeys);
+  const rawJiraFields = { ...jiraFields };
+  const defaultSelectedKeys = getDefaultSelectedColumnKeys(allColumns);
 
-  return {
+  const baseDataset: Dataset = {
     id: `ds_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     name: fileName.replace(/\.[^/.]+$/, ''),
     sourceType: isJira ? 'jira' : 'generic',
@@ -363,8 +425,165 @@ export function parseCsvFile(content: string, fileName: string, fileSize: number
     fileSize,
     importedAt: new Date().toISOString(),
     rows,
-    columns,
-    jiraFields,
+    columns: allColumns,
+    allColumns,
+    selectedColumnKeys: defaultSelectedKeys,
+    rawJiraFields,
+    jiraFields: rawJiraFields,
+  };
+
+  return applyDatasetColumnSelection(baseDataset, defaultSelectedKeys, rawJiraFields);
+}
+
+/**
+ * Returns non-derived selectable columns from the dataset's full column catalog.
+ */
+export function getSelectableColumns(dataset: Dataset): ColumnMeta[] {
+  const catalog = dataset.allColumns && dataset.allColumns.length > 0 ? dataset.allColumns : dataset.columns;
+  return catalog.filter(c => !c.key.startsWith('_derived_'));
+}
+
+/**
+ * Default selected columns: all non-derived columns except duplicate __N sub-columns
+ * when a merged array column already represents them.
+ */
+export function getDefaultSelectedColumnKeys(allColumns: ColumnMeta[]): string[] {
+  const mergedBases = new Set(
+    allColumns
+      .filter(c => c.key.startsWith('_merged_'))
+      .map(c => c.key.replace('_merged_', ''))
+  );
+
+  return allColumns
+    .filter(c => {
+      if (c.key.startsWith('_derived_')) return false;
+      const dupMatch = c.key.match(/^(.+)__(\d+)$/);
+      if (dupMatch && mergedBases.has(dupMatch[1])) {
+        return false;
+      }
+      return true;
+    })
+    .map(c => c.key);
+}
+
+/**
+ * Ensures older persisted datasets receive allColumns, rawJiraFields, and selectedColumnKeys.
+ */
+export function ensureDatasetColumnModel(dataset: Dataset): Dataset {
+  const catalog = dataset.allColumns && dataset.allColumns.length > 0 ? dataset.allColumns : dataset.columns;
+  const rawJira = dataset.rawJiraFields || dataset.jiraFields || {};
+  const selectedKeys =
+    dataset.selectedColumnKeys && dataset.selectedColumnKeys.length > 0
+      ? dataset.selectedColumnKeys
+      : getDefaultSelectedColumnKeys(catalog);
+
+  if (dataset.allColumns && dataset.selectedColumnKeys && dataset.rawJiraFields) {
+    return dataset;
+  }
+
+  return applyDatasetColumnSelection(
+    {
+      ...dataset,
+      allColumns: catalog,
+      rawJiraFields: rawJira,
+    },
+    selectedKeys,
+    rawJira
+  );
+}
+
+/**
+ * Applies the client's checked column keys and optional custom main field mappings
+ * so the entire application operates strictly on selected columns & assigned filter groups.
+ */
+export function applyDatasetColumnSelection(
+  dataset: Dataset,
+  selectedKeys: string[],
+  customRawJiraFields?: Dataset['jiraFields']
+): Dataset {
+  const baseCatalog = (dataset.allColumns && dataset.allColumns.length > 0 ? dataset.allColumns : dataset.columns)
+    .filter(c => !c.key.startsWith('_derived_'));
+  const catalogKeySet = new Set(baseCatalog.map(c => c.key));
+
+  // Keep valid non-derived keys chosen by the client
+  const cleanedSelected = Array.from(
+    new Set(selectedKeys.filter(k => catalogKeySet.has(k)))
+  );
+  const selectedSet = new Set(cleanedSelected);
+
+  // Normalize custom or existing raw field mapping (allowing empty/unassigned fields)
+  const sourceMapping = customRawJiraFields !== undefined
+    ? customRawJiraFields
+    : (dataset.rawJiraFields || dataset.jiraFields || {});
+  const rawJira: NonNullable<Dataset['jiraFields']> = {};
+  (Object.keys(sourceMapping) as Array<keyof NonNullable<Dataset['jiraFields']>>).forEach(field => {
+    const val = sourceMapping[field];
+    if (val && typeof val === 'string' && val.trim() !== '' && catalogKeySet.has(val)) {
+      rawJira[field] = val;
+    }
+  });
+
+  const isFieldActive = (colKey?: string): boolean => {
+    if (!colKey) return false;
+    if (selectedSet.has(colKey)) return true;
+    if (colKey.startsWith('_merged_')) {
+      const base = colKey.replace('_merged_', '');
+      return selectedSet.has(base);
+    }
+    if (selectedSet.has(`_merged_${colKey}`)) return true;
+    return false;
+  };
+
+  const effectiveJiraFields: NonNullable<Dataset['jiraFields']> = {};
+  (Object.keys(rawJira) as Array<keyof NonNullable<Dataset['jiraFields']>>).forEach((field) => {
+    const colKey = rawJira[field];
+    if (colKey && isFieldActive(colKey)) {
+      if (selectedSet.has(colKey)) {
+        effectiveJiraFields[field] = colKey;
+      } else if (colKey.startsWith('_merged_') && selectedSet.has(colKey.replace('_merged_', ''))) {
+        effectiveJiraFields[field] = colKey.replace('_merged_', '');
+      } else if (!colKey.startsWith('_merged_') && selectedSet.has(`_merged_${colKey}`)) {
+        effectiveJiraFields[field] = `_merged_${colKey}`;
+      }
+    }
+  });
+
+  // Recompute derived fields when custom mappings are applied or fields changed
+  const rows = dataset.rows;
+  computeDerivedJiraFields(rows, effectiveJiraFields);
+
+  const derivedKeys: string[] = [];
+  if (effectiveJiraFields.statusCol) derivedKeys.push('_derived_status_bucket');
+  if (effectiveJiraFields.priorityCol) derivedKeys.push('_derived_priority_score');
+  const hasLeadStart = Boolean(effectiveJiraFields.createdCol || effectiveJiraFields.startDateCol);
+  const hasLeadEnd = Boolean(effectiveJiraFields.resolvedCol || effectiveJiraFields.dueCol);
+  if (hasLeadStart && hasLeadEnd && rows.some(r => typeof r['_derived_lead_time_days'] === 'number')) {
+    derivedKeys.push('_derived_lead_time_days');
+  }
+
+  const derivedMetas = derivedKeys.length > 0 ? computeColumnMetadata(rows, derivedKeys) : [];
+  const fullCatalog = [...baseCatalog, ...derivedMetas];
+  const activeColumns = [
+    ...baseCatalog.filter(c => selectedSet.has(c.key)),
+    ...derivedMetas,
+  ];
+
+  const hasJiraCore = Boolean(
+    effectiveJiraFields.keyCol ||
+    effectiveJiraFields.summaryCol ||
+    effectiveJiraFields.statusCol ||
+    effectiveJiraFields.startDateCol ||
+    effectiveJiraFields.dueCol
+  );
+
+  return {
+    ...dataset,
+    sourceType: hasJiraCore ? 'jira' : 'generic',
+    allColumns: fullCatalog,
+    selectedColumnKeys: cleanedSelected,
+    columns: activeColumns,
+    rawJiraFields: rawJira,
+    jiraFields: effectiveJiraFields,
   };
 }
 
@@ -386,20 +605,25 @@ export function upsertDataset(
   existingDataset: Dataset,
   incomingDataset: Dataset
 ): UpsertResult {
-  const keyCol = existingDataset.jiraFields?.keyCol || incomingDataset.jiraFields?.keyCol || 'Konu anahtarı';
+  const existingNorm = ensureDatasetColumnModel(existingDataset);
+  const incomingNorm = ensureDatasetColumnModel(incomingDataset);
+
+  const existingRawJira = existingNorm.rawJiraFields || existingNorm.jiraFields || {};
+  const incomingRawJira = incomingNorm.rawJiraFields || incomingNorm.jiraFields || {};
+  const keyCol = existingRawJira.keyCol || incomingRawJira.keyCol || 'Konu anahtarı';
   
   // Index existing rows by Key
   const existingKeyMap = new Map<string, { row: DataRow; index: number }>();
-  existingDataset.rows.forEach((r, idx) => {
+  existingNorm.rows.forEach((r, idx) => {
     const k = r[keyCol]?.trim();
     if (k) existingKeyMap.set(k, { row: r, index: idx });
   });
 
-  const mergedRows = [...existingDataset.rows];
+  const mergedRows = [...existingNorm.rows];
   let updatedCount = 0;
   let insertedCount = 0;
 
-  incomingDataset.rows.forEach((incomingRow) => {
+  incomingNorm.rows.forEach((incomingRow) => {
     const k = incomingRow[keyCol]?.trim();
 
     if (k && existingKeyMap.has(k)) {
@@ -418,30 +642,44 @@ export function upsertDataset(
     }
   });
 
-  // Re-calculate derived fields
-  if (existingDataset.sourceType === 'jira') {
-    computeDerivedJiraFields(mergedRows, existingDataset.jiraFields);
+  const combinedRawJira = { ...incomingRawJira, ...existingRawJira };
+
+  // Re-calculate derived fields using full Jira metadata
+  if (combinedRawJira.keyCol || combinedRawJira.summaryCol || combinedRawJira.statusCol) {
+    computeDerivedJiraFields(mergedRows, combinedRawJira);
   }
 
-  // Union of columns from existing and incoming datasets
-  const existingColKeys = new Set(existingDataset.columns.map(c => c.key));
-  const combinedColKeys = [...existingDataset.columns.map(c => c.key)];
-  incomingDataset.columns.forEach(col => {
+  // Union of all columns from existing and incoming full catalogs
+  const existingAll = existingNorm.allColumns || existingNorm.columns;
+  const incomingAll = incomingNorm.allColumns || incomingNorm.columns;
+  const existingColKeys = new Set(existingAll.map(c => c.key));
+  const combinedColKeys = [...existingAll.map(c => c.key)];
+  incomingAll.forEach(col => {
     if (!existingColKeys.has(col.key)) {
       combinedColKeys.push(col.key);
       existingColKeys.add(col.key);
     }
   });
 
-  const recomputedColumns = computeColumnMetadata(mergedRows, combinedColKeys);
+  const recomputedAllColumns = computeColumnMetadata(mergedRows, combinedColKeys);
 
-  const updatedDataset: Dataset = {
-    ...existingDataset,
-    rows: mergedRows,
-    columns: recomputedColumns,
-    fileSize: existingDataset.fileSize + incomingDataset.fileSize,
-    importedAt: new Date().toISOString(),
-  };
+  // Preserve union of selected column keys (existing selection + incoming selection)
+  const existingSelected = existingNorm.selectedColumnKeys || getDefaultSelectedColumnKeys(existingAll);
+  const incomingSelected = incomingNorm.selectedColumnKeys || getDefaultSelectedColumnKeys(incomingAll);
+  const mergedSelectedKeys = Array.from(new Set([...existingSelected, ...incomingSelected]));
+
+  const updatedDataset = applyDatasetColumnSelection(
+    {
+      ...existingNorm,
+      rows: mergedRows,
+      allColumns: recomputedAllColumns,
+      rawJiraFields: combinedRawJira,
+      columns: recomputedAllColumns,
+      fileSize: existingNorm.fileSize + incomingNorm.fileSize,
+      importedAt: new Date().toISOString(),
+    },
+    mergedSelectedKeys
+  );
 
   return {
     updatedCount,

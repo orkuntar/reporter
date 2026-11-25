@@ -7,9 +7,11 @@ import {
   Edit3,
   Check,
   FileSpreadsheet,
-  ArrowRightCircle
+  ArrowRightCircle,
+  Columns
 } from 'lucide-react';
 import { Dataset } from '../../types';
+import { getSelectableColumns } from '../../core/parser';
 
 interface DatasetManagerModalProps {
   isOpen: boolean;
@@ -20,6 +22,7 @@ interface DatasetManagerModalProps {
   onSelectDataset: (id: string) => void;
   onRenameDataset: (id: string, newName: string) => void;
   onDeleteDataset: (id: string) => void;
+  onEditDatasetColumns: (dataset: Dataset) => void;
   onSaveFilteredAsNewDataset: (name: string) => void;
   onImportNewCsv: () => void;
 }
@@ -33,12 +36,14 @@ export const DatasetManagerModal: React.FC<DatasetManagerModalProps> = ({
   onSelectDataset,
   onRenameDataset,
   onDeleteDataset,
+  onEditDatasetColumns,
   onSaveFilteredAsNewDataset,
   onImportNewCsv,
 }) => {
   const [newDatasetName, setNewDatasetName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -157,7 +162,9 @@ export const DatasetManagerModal: React.FC<DatasetManagerModalProps> = ({
                     )}
 
                     <div className="text-2xs text-slate-400 mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
-                      <span>{ds.rows.length.toLocaleString()} satır · {ds.columns.length} kolon</span>
+                      <span>
+                        {ds.rows.length.toLocaleString()} satır · {ds.selectedColumnKeys?.length ?? ds.columns.filter(c => !c.key.startsWith('_derived_')).length}/{getSelectableColumns(ds).length} kolon
+                      </span>
                       <span>•</span>
                       <span className="truncate max-w-[180px]" title={ds.sourceFile}>Dosya: {ds.sourceFile}</span>
                       <span>•</span>
@@ -181,6 +188,18 @@ export const DatasetManagerModal: React.FC<DatasetManagerModalProps> = ({
                   )}
 
                   <button
+                    onClick={() => {
+                      onClose();
+                      onEditDatasetColumns(ds);
+                    }}
+                    className="flex items-center space-x-1 px-2 py-1 text-2xs text-cyan-300 hover:text-white bg-cyan-950/30 hover:bg-cyan-500/20 border border-cyan-500/30 rounded transition-colors"
+                    title="Kullanılacak Kolonları Seç"
+                  >
+                    <Columns className="w-3 h-3" />
+                    <span>Kolonlar</span>
+                  </button>
+
+                  <button
                     onClick={() => startEdit(ds)}
                     className="p-1.5 text-slate-400 hover:text-white hover:bg-white/[0.06] rounded transition-colors"
                     title="Yeniden Adlandır"
@@ -188,13 +207,33 @@ export const DatasetManagerModal: React.FC<DatasetManagerModalProps> = ({
                     <Edit3 className="w-3.5 h-3.5" />
                   </button>
 
-                  <button
-                    onClick={() => onDeleteDataset(ds.id)}
-                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
-                    title="Veri Setini Sil"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {confirmDeleteId === ds.id ? (
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => {
+                          onDeleteDataset(ds.id);
+                          setConfirmDeleteId(null);
+                        }}
+                        className="px-2 py-1 text-2xs bg-rose-600 hover:bg-rose-500 text-white rounded font-semibold transition-colors"
+                      >
+                        Emin misiniz? Sil
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="px-2 py-1 text-2xs text-slate-400 hover:text-white bg-white/[0.04] rounded transition-colors"
+                      >
+                        İptal
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(ds.id)}
+                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
+                      title="Veri Setini Sil"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

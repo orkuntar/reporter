@@ -130,7 +130,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
   };
 
   return (
-    <div className="bg-[#0b0e14] border-b border-white/[0.08] px-4 py-3.5 space-y-3 animate-in slide-in-from-top-2 duration-150 shadow-2xl select-none">
+    <div className="bg-[#0b0e14] border-b border-white/[0.08] px-4 py-3.5 space-y-3 animate-in slide-in-from-top-2 duration-150 shadow-2xl select-none no-print">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-1.5 text-xs font-mono font-semibold tracking-wider uppercase text-cyan-400">

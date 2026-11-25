@@ -31,6 +31,26 @@ export interface Dataset {
   importedAt: string;
   rows: DataRow[];
   columns: ColumnMeta[];
+  allColumns?: ColumnMeta[];
+  selectedColumnKeys?: string[];
+  rawJiraFields?: {
+    keyCol?: string;
+    summaryCol?: string;
+    typeCol?: string;
+    statusCol?: string;
+    priorityCol?: string;
+    assigneeCol?: string;
+    createdCol?: string;
+    resolvedCol?: string;
+    dueCol?: string;
+    labelsCol?: string;
+    departmentCol?: string;
+    moduleCol?: string;
+    startDateCol?: string;
+    workStartDateCol?: string;
+    environmentCol?: string;
+    requesterCol?: string;
+  };
   jiraFields?: {
     keyCol?: string;
     summaryCol?: string;
